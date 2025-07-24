@@ -25,6 +25,7 @@ var (
 
 var (
 	polygonAPIKey string
+	fmpAPIKey     string // New for FMP
 	listenPort    int
 )
 
@@ -59,8 +60,23 @@ type linePoint struct {
 type payload struct {
 	Candles []candlePoint `json:"candles"`
 	Volume  []linePoint   `json:"volume"` // NEW
+	MinCandles []candlePoint `json:"minCandles"`
+	MinVolume  []linePoint   `json:"minVolume"`
 	VWAP    []linePoint   `json:"vwap"`
 	SMA9    []linePoint   `json:"sma"`
+}
+
+/* ─── New structs for APIs ────────────────────────────── */
+
+type PolygonTickerDetails struct {
+  Results struct {
+    MarketCap float64 `json:"market_cap"`
+  } `json:"results"`
+}
+
+type FMPFloat struct {
+  Symbol              string `json:"symbol"`
+  FloatShares         float64 `json:"floatShares"`
 }
 
 /*────────────────────  helpers  ─────────────────────────*/
@@ -84,6 +100,42 @@ func queryPolygon(sym string, mult int, span, from, to string) ([]polygonBar, er
 	return pr.Results, nil
 }
 
+/* ─── New: Query Polygon Ticker Details ──────────────────── */
+func queryPolygonTickerDetails(ticker string) (*PolygonTickerDetails, error) {
+	url := fmt.Sprintf("https://api.polygon.io/v3/reference/tickers/%s?apiKey=%s", ticker, polygonAPIKey)
+	resp, err := http.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("Polygon Ticker Details: %s", resp.Status)
+	}
+	var details PolygonTickerDetails
+	if err := json.NewDecoder(resp.Body).Decode(&details); err != nil {
+		return nil, err
+	}
+	return &details, nil
+}
+
+/* ─── New: Query FMP Share Float ──────────────────────────── */
+func queryFMPFloat(ticker string) ([]FMPFloat, error) {
+	url := fmt.Sprintf("https://financialmodelingprep.com/api/v4/shares_float?symbol=%s&apikey=%s", ticker, fmpAPIKey)
+	resp, err := http.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("FMP Float: %s", resp.Status)
+	}
+	var floats []FMPFloat
+	if err := json.NewDecoder(resp.Body).Decode(&floats); err != nil {
+		return nil, err
+	}
+	return floats, nil
+}
+
 func openBrowser(u string) {
 	if err := exec.Command("google-chrome", "--new-tab", u).Start(); err != nil {
 		_ = exec.Command("xdg-open", u).Start()
@@ -103,6 +155,7 @@ func candlesHandler(w http.ResponseWriter, r *http.Request) {
 	symbol  := strings.ToUpper(q.Get("ticker"))
 	tf      := strings.ToLower(strings.TrimSpace(q.Get("timeframe")))
 	dateStr := q.Get("date") // YYYY-MM-DD
+	extended := q.Get("extended") == "true"
 
 	if symbol == "" || tf == "" || dateStr == "" {
 		http.Error(w, "ticker, timeframe, date required", 400)
@@ -135,7 +188,7 @@ func candlesHandler(w http.ResponseWriter, r *http.Request) {
 	for _, b := range bars {
 		ts := time.UnixMilli(b.T).In(loc)
 		h,m := ts.Hour(), ts.Minute()
-		if h < 9 || (h==9 && m<30) || h >= 16 { continue } // RTH filter
+		if !extended && (h < 9 || (h==9 && m<30) || h >= 16) { continue } // RTH filter if not extended
 
 		candles = append(candles, candlePoint{
 			Time:b.T/1000, Open:b.O, High:b.H, Low:b.L, Close:b.C})
@@ -151,23 +204,64 @@ func candlesHandler(w http.ResponseWriter, r *http.Request) {
 		if i>=8 { sma = append(sma,linePoint{Time:c.Time,Value:sum/9}) }
 	}
 
-	/* ---------- VWAP (1-min bars) ---------- */
+	/* ---------- VWAP, MinCandles, MinVolume (1-min bars) ---------- */
 	minBars, err := queryPolygon(symbol,1,"minute",dateStr,dateStr)
 	if err != nil { http.Error(w, err.Error(), 502); return }
 
 	var cumPV,cumV float64
 	vwap := make([]linePoint,0,len(minBars))
+	minCandles := make([]candlePoint, 0, len(minBars))
+	minVol := make([]linePoint, 0, len(minBars))
 	for _,b := range minBars{
 		ts:=time.UnixMilli(b.T).In(loc); h,m:=ts.Hour(),ts.Minute()
-		if h<9||(h==9&&m<30)||h>=16{continue}
+		if !extended && (h<9||(h==9&&m<30)||h>=16){continue}
 		typ := (b.H+b.L+b.C)/3
 		cumPV += typ*b.V; cumV += b.V
 		if cumV>0 { vwap=append(vwap,linePoint{Time:b.T/1000,Value:cumPV/cumV}) }
+		minCandles = append(minCandles, candlePoint{
+			Time:b.T/1000, Open:b.O, High:b.H, Low:b.L, Close:b.C})
+		minVol = append(minVol, linePoint{Time:b.T/1000, Value:b.V})
 	}
 
-	out := payload{Candles:candles, Volume:vol, VWAP:vwap, SMA9:sma}
-	w.Header().Set("Content-Type","application/json")
+	out := payload{Candles:candles, Volume:vol, MinCandles:minCandles, MinVolume:minVol, VWAP:vwap, SMA9:sma}
+	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(out)
+}
+
+/* ─── New Handler: Ticker Details (Polygon Proxy) ────────── */
+func tickerDetailsHandler(w http.ResponseWriter, r *http.Request) {
+	ticker := strings.ToUpper(r.URL.Query().Get("ticker"))
+	if ticker == "" {
+		http.Error(w, "ticker required", 400)
+		return
+	}
+
+	details, err := queryPolygonTickerDetails(ticker)
+	if err != nil {
+		http.Error(w, err.Error(), 502)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(details)
+}
+
+/* ─── New Handler: Share Float (FMP Proxy) ────────────────── */
+func shareFloatHandler(w http.ResponseWriter, r *http.Request) {
+	ticker := strings.ToUpper(r.URL.Query().Get("ticker"))
+	if ticker == "" {
+		http.Error(w, "ticker required", 400)
+		return
+	}
+
+	floats, err := queryFMPFloat(ticker)
+	if err != nil {
+		http.Error(w, err.Error(), 502)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(floats)
 }
 
 /*────────────────────  main  ───────────────────────────*/
@@ -180,12 +274,17 @@ func main() {
 	if polygonAPIKey=="" { polygonAPIKey = os.Getenv("POLYGON_API_KEY") }
 	if polygonAPIKey=="" { log.Fatal("Polygon API key missing") }
 
+	fmpAPIKey = os.Getenv("FMP_API_KEY")
+	if fmpAPIKey == "" { log.Fatal("FMP API key missing") }
+
 	if *portFlag!=0 { listenPort=*portFlag
 	} else if p:=os.Getenv("PORT"); p!="" { fmt.Sscanf(p,"%d",&listenPort) }
-	if listenPort==0 { listenPort=8080 }
+	if listenPort==0 { listenPort=8081 }
 
 	http.HandleFunc("/", rootHandler)
 	http.HandleFunc("/api/candles", candlesHandler)
+	http.HandleFunc("/api/ticker-details", tickerDetailsHandler) // New
+	http.HandleFunc("/api/share-float", shareFloatHandler)       // New
 
 	addr := fmt.Sprintf(":%d", listenPort)
 	go func(){ time.Sleep(500*time.Millisecond); openBrowser("http://localhost"+addr) }()

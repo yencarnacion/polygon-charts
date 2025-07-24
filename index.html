@@ -1,153 +1,532 @@
-<script type="text/javascript">
-        var gk_isXlsx = false;
-        var gk_xlsxFileLookup = {};
-        var gk_fileData = {};
-        function filledCell(cell) {
-          return cell !== '' && cell != null;
-        }
-        function loadFileData(filename) {
-        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
-            try {
-                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
-                var firstSheetName = workbook.SheetNames[0];
-                var worksheet = workbook.Sheets[firstSheetName];
-
-                // Convert sheet to JSON to filter blank rows
-                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
-                // Filter out blank rows (rows where all cells are empty, null, or undefined)
-                var filteredData = jsonData.filter(row => row.some(filledCell));
-
-                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
-                var headerRowIndex = filteredData.findIndex((row, index) =>
-                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
-                );
-                // Fallback
-                if (headerRowIndex === -1 || headerRowIndex > 25) {
-                  headerRowIndex = 0;
-                }
-
-                // Convert filtered JSON back to CSV
-                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
-                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
-                return csv;
-            } catch (e) {
-                console.error(e);
-                return "";
-            }
-        }
-        return gk_fileData[filename] || "";
-        }
-        </script><!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8"/>
-    <title>Candlestick Viewer – Dark Mode + Volume</title>
+  <meta charset="UTF-8"/>
+  <title>Candlestick + Signals Viewer (Debug Mode)</title>
 
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+  <!-- Bootstrap & Flatpickr -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css" rel="stylesheet">
 
-    <style>
-        body { margin: 1rem; background: #121212; color: #e0e0e0 }
-        #chart { height: 600px }
-        .form-control, .form-select { background: #1e1e1e !important; color: #e0e0e0 !important; border: 1px solid #444 !important }
-    </style>
+  <!-- Tabulator CSS -->
+  <link href="https://cdn.jsdelivr.net/npm/tabulator-tables@5.4.4/dist/css/tabulator.min.css" rel="stylesheet"/>
+
+  <style>
+    body { margin:1rem; background:#121212; color:#e0e0e0 }
+    #chart { height:600px; }
+
+    .form-control, .form-select {
+      background:#1e1e1e!important;
+      color:#e0e0e0!important;
+      border:1px solid #444!important;
+    }
+
+    /* ─── Grid / Sheet Styling ─────────────────────────────── */
+    #sheet { margin-top:1rem; max-width:100%; overflow-x:hidden; }
+
+    /* Header container */
+    #sheet .tabulator-header {
+      background:#000000;                /* solid black header bar */
+    }
+
+    /* Individual header cells */
+    #sheet .tabulator-col {
+      background:#000000;                /* ensure every header cell is black */
+    }
+
+    /* Header title text */
+    #sheet .tabulator-col-title {
+      color:#ffffff!important;           /* bold white text */
+      font-weight:bold;
+      overflow:hidden;                   /* keep a single‑line ellipsis */
+      text-overflow:ellipsis;
+      white-space:nowrap;
+      user-select:text;
+    }
+
+    #sheet .tabulator-tableholder{
+      background:#1e1e1e;
+      color:#e0e0e0;
+    }
+
+    #sheet .tabulator-cell{
+      background:#2a2a2a;
+      color:#e0e0e0;
+      user-select:text;
+    }
+
+    #sheet .tabulator-row-even{background-color:#252525;}
+    #sheet .tabulator-row-odd {background-color:#2a2a2a;}
+
+    /* --- Tabulator header tooltip (hover popup) --- */
+    .tabulator-tooltip{
+      background:#000 !important;   /* black background  */
+      color:#fff !important;        /* bold white text   */
+      font-weight:bold;             /* make text bold    */
+      z-index: 9999;
+      max-width: 600px;
+      white-space: pre-line;
+      word-break: break-all;
+    }
+
+    /* --- Editing input styling for readability --- */
+    .tabulator-editing input,
+    .tabulator-editing textarea,
+    .tabulator-editing select {
+      background-color: #ffffff !important; /* White background for edit mode */
+      color: #000000 !important;            /* Black text for readability */
+      border: 1px solid #cccccc !important; /* Light border */
+    }
+
+    /* ─── Row Indicator Styling ────────────────────────────── */
+    #row-indicator {
+      position: absolute;
+      top: 100px; /* Adjust based on your header height; above the chart */
+      right: 20px;
+      color: #ffffff;
+      font-weight: bold;
+      font-size: 18px;
+      background-color: rgba(0, 0, 0, 0.7); /* Semi-transparent black for visibility */
+      padding: 5px 10px;
+      border-radius: 5px;
+      z-index: 1000; /* Ensure it's on top */
+    }
+
+  </style>
 </head>
 <body>
 
 <h3 class="mb-3">Candles + Volume (gray), VWAP (yellow) & SMA-9 (red)</h3>
 
 <form id="form" class="row gy-2 gx-2 align-items-center">
-    <div class="col-auto"><input id="ticker" class="form-control" value="SPY" placeholder="Ticker"></div>
-    <div class="col-auto">
-        <select id="timeframe" class="form-select">
-            <option value="1m">1 m</option><option value="2m">2 m</option><option value="3m">3 m</option>
-            <option value="5m" selected>5 m</option><option value="10m">10 m</option><option value="15m">15 m</option>
-            <option value="30m">30 m</option><option value="1h">1 h</option>
-        </select>
-    </div>
-    <div class="col-auto"><input id="date" class="form-control" placeholder="Date"></div>
-    <div class="col-auto"><button class="btn btn-primary" type="submit">Load</button></div>
+  <div class="col-auto"><input id="ticker" class="form-control" value="SPY" placeholder="Ticker"></div>
+  <div class="col-auto">
+    <select id="timeframe" class="form-select">
+      <option value="1m" selected>1 m</option><option value="2m">2 m</option><option value="3m">3 m</option>
+      <option value="5m">5 m</option><option value="10m">10 m</option><option value="15m">15 m</option>
+      <option value="30m">30 m</option><option value="1h">1 h</option>
+    </select>
+  </div>
+  <div class="col-auto"><input id="date" class="form-control" placeholder="Date"></div>
+  <div class="col-auto"><button class="btn btn-primary" type="submit">Load</button></div>
 </form>
 
+<div class="d-flex align-items-center gap-2 flex-wrap mt-3">
+  <input id="csvFile" type="file" accept=".csv,text/csv" class="form-control" style="max-width:260px">
+  <input id="newColumn" class="form-control" placeholder="New column name" style="max-width:200px">
+  <button id="addColumn" class="btn btn-outline-success btn-sm">Add Column</button>
+  <button id="prevRow" class="btn btn-outline-light btn-sm">▲ Prev</button>
+  <button id="nextRow" class="btn btn-outline-light btn-sm">▼ Next</button>
+  <button id="downloadCsv" class="btn btn-secondary btn-sm ms-auto">Export CSV</button>
+</div>
+
+<!-- Row Indicator -->
+<div id="row-indicator"></div>
+
+<!-- Chart above the sheet -->
 <div id="chart" class="border mt-4 rounded"></div>
 
+<!-- Editable grid below -->
+<div id="sheet"></div>
+
+<!-- Libraries -->
 <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
 <script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.0.0/dist/lightweight-charts.standalone.production.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tabulator-tables@5.4.4/dist/js/tabulator.min.js"></script>
 
 <script>
-    flatpickr('#date', { dateFormat: 'Y-m-d', defaultDate: '2024-03-25' });
+/* ─── Date picker with current NY date default ───────────── */
+const nyFormatter = new Intl.DateTimeFormat('en-CA',{
+  timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit'});
+const currentNyDate = nyFormatter.format(new Date());
+flatpickr('#date',{dateFormat:'Y-m-d',defaultDate:currentNyDate});
 
-    /* -------- chart (dark) -------- */
-    const chart = LightweightCharts.createChart(document.getElementById('chart'), {
-        layout: { background: { color: '#1e1e1e' }, textColor: '#cccccc', fontFamily: 'sans-serif' },
-        grid: { vertLines: { color: '#2e2e2e' }, horzLines: { color: '#2e2e2e' } },
-        timeScale: {
-            timeVisible: true,
-            secondsVisible: false,
-            tickMarkFormatter: t => new Date(t * 1000).toLocaleTimeString(
-                'en-US', { timeZone: 'America/New_York', hour12: false, hour: '2-digit', minute: '2-digit' }
-            )
-        }
+/* ─── Chart setup ─────────────────────────────────────────── */
+const chart = LightweightCharts.createChart(document.getElementById('chart'),{
+  layout:{background:{color:'#1e1e1e'},textColor:'#cccccc'},
+  grid:{vertLines:{color:'#2e2e2e'},horzLines:{color:'#2e2e2e'}},
+  timeScale:{timeVisible:true,secondsVisible:false,
+    tickMarkFormatter:t=>new Date(t*1000).toLocaleTimeString(
+      'en-US',{timeZone:'America/New_York',hour12:false,hour:'2-digit',minute:'2-digit'})}
+});
+const candleSeries = chart.addCandlestickSeries({
+  upColor:'#26a69a',downColor:'#ef5350',
+  wickUpColor:'#26a69a',wickDownColor:'#ef5350',borderVisible:false});
+const volumeSeries = chart.addHistogramSeries({
+  color:'#888',priceFormat:{type:'volume'},
+  priceScaleId:'vol',scaleMargins:{top:0.75,bottom:0}});
+chart.priceScale('right').applyOptions({scaleMargins:{top:0.05,bottom:0.35}});
+chart.priceScale('vol').applyOptions({scaleMargins:{top:0.75,bottom:0}});
+const vwapSeries = chart.addLineSeries({color:'#ffd700',lineWidth:2});
+const smaSeries  = chart.addLineSeries({color:'#ff4444',lineWidth:2});
+
+/* ─── Global data storage ────────────────────────────────── */
+let cachedCandles = [];
+let cachedVolume  = [];
+let cachedMinCandles = [];
+let cachedMinVolume  = [];
+let priorDayCloses   = {};   // Store prior‑day closes
+let priorDayVolumes = {}; // New: Store prior-day RTH volumes
+
+/* ─── Load candles with debug logging ────────────────────── */
+async function load(e){
+  if(e) e.preventDefault();
+  const ticker   = document.getElementById('ticker').value.trim();
+  const timeframe= document.getElementById('timeframe').value;
+  const date     = document.getElementById('date').value;
+  console.debug('[load] requesting',{ticker,timeframe,date});
+  if(!ticker||!timeframe||!date){alert('Fill all fields');return;}
+  try{
+    const {data}=await axios.get('/api/candles',{params:{ticker,timeframe,date}});
+    console.debug('[load] received',data.candles.length,'bars');
+    if(!data.candles.length){console.warn('[load] no candles',ticker,date,timeframe);}
+
+    /* Cache */
+    cachedCandles=data.candles;cachedVolume=data.volume;
+    cachedMinCandles=data.minCandles;cachedMinVolume=data.minVolume;
+
+    candleSeries.setData(data.candles);
+    volumeSeries.setData(data.volume);
+    vwapSeries.setData(data.vwap);
+    smaSeries.setData(data.sma);
+    candleSeries.setMarkers([]);
+    chart.timeScale().fitContent();
+
+    await fetchPriorDayClose(ticker,date);
+  }catch(err){
+    console.error('[load] error',err);
+    alert('Error: '+(err.response?.data||err));
+  }
+}
+
+/* ─── Fetch prior‑day close (handles holidays/weekends) ─── */
+async function fetchPriorDayClose(ticker,date){
+  if(priorDayCloses[ticker]) return;     // cached
+
+  let attempts=0; let d=new Date(date); const maxAttempts=10;
+  while(attempts<maxAttempts){
+    d.setDate(d.getDate()-1);
+    while(d.getDay()===0||d.getDay()===6){d.setDate(d.getDate()-1);} // skip wknd
+    const priorDate=d.toISOString().split('T')[0];
+    console.debug('[priorDay] fetching',ticker,priorDate);
+    try{
+      const {data}=await axios.get('/api/candles',
+        {params:{ticker,timeframe:'1m',date:priorDate}});
+      if(data.candles&&data.candles.length>0){
+        const last=data.candles[data.candles.length-1];
+        priorDayCloses[ticker]=last.close;
+        console.debug('[priorDay] close',ticker,last.close);
+        // New: Cache prior day RTH volume
+        const priorVol = data.minVolume.reduce((sum,v)=>sum + v.value,0);
+        priorDayVolumes[ticker] = priorVol;
+        return;
+      }else{console.warn('[priorDay] no candles',priorDate);}
+    }catch(err){console.warn('[priorDay] error',priorDate,err);}
+    attempts++;
+  }
+  console.error('[priorDay] could not find close');
+}
+
+document.getElementById('form').addEventListener('submit',load);
+load(); // initial
+
+/* ─── Tabulator grid & navigation ─────────────────────────── */
+let table,csvData=[],currentRow=0;
+
+/* New columns that get added to CSV rows */
+const NEW_COLUMNS=[
+  'market_cap','float','open_price','close_price','high_of_day','low_of_day',
+  'percent_gain_eod','max_spiking_up_percent','max_spiking_down_percent',
+  'volume','percent_gap_from_prior', 'prior_day_volume', 'pre_market_volume'];
+
+/* Update table view to show only current row */
+function updateTableView(){
+  table.setFilter("__row","=",currentRow);
+  table.getColumns().forEach(col=>{
+    const field=col.getField();
+    if(field==="__row"){col.hide();return;}
+    col.show();
+  });
+  // Update row indicator
+  document.getElementById('row-indicator').textContent = `${currentRow + 1}/${csvData.length}`;
+}
+
+/* ─── Tooltip only for truncated cell values ──────────────── */
+function truncatedTooltip(cell){
+  // If cell element exists, and the content is overflowed (truncated), show full value as tooltip
+  const el = cell.getElement();
+  if (el && el.scrollWidth > el.clientWidth) {
+    return cell.getValue();
+  }
+  return false; // No tooltip unless overflow
+}
+
+/* Build blank Tabulator instance */
+function setupTable(){
+  table=new Tabulator("#sheet",{
+    data:[],
+    index:"__row",
+    layout:"fitColumns",
+    headerWordWrap:true,
+    tooltipsHeader:true,            // header tooltips as before
+    tooltips: truncatedTooltip,     // <-- enable tooltips only if truncated
+    columns:[],
+    cellEdited:cell=>{
+      const rowIdx=cell.getRow().getData().__row;
+      const field =cell.getField();
+      const value =cell.getValue();
+      csvData[rowIdx][field]=value;
+      console.debug('[edit]',rowIdx,field,value);
+    },
+  });
+}
+setupTable();
+
+/* ─── Fetch extended hours data for pre/after market ────── */
+async function fetchExtendedData(ticker, date){
+  console.debug('[extended] fetching for', ticker, date);
+  try {
+    const {data} = await axios.get('/api/candles', {
+      params: {ticker, timeframe: '1m', date, extended: 'true'}
     });
+    return data.minVolume; // Returns all 1m bars (pre, RTH, after)
+  } catch (err) {
+    console.error('[extended] error', err);
+    return [];
+  }
+}
 
-    const candleSeries = chart.addCandlestickSeries({
-        upColor: '#26a69a', downColor: '#ef5350', borderVisible: false,
-        wickUpColor: '#26a69a', wickDownColor: '#ef5350'
-    });
+/* ─── Calculate pre-market volume ────────────────────────── */
+async function calculatePreMarketVolume(ticker, currentDate, priorDate){
+  // Fetch prior day extended (for after-hours)
+  const priorExtVol = await fetchExtendedData(ticker, priorDate);
+  const priorAfterHours = priorExtVol.filter(v => {
+    const ts = new Date(v.time * 1000);
+    const hour = ts.getHours();
+    return hour >= 16 && hour < 20; // 4 PM to 8 PM (after-hours)
+  }).reduce((sum, v) => sum + v.value, 0);
 
-    /* ---- volume histogram uses its own price scale ---- */
-    const volumeSeries = chart.addHistogramSeries({
-        color: '#888',
-        priceFormat: { type: 'volume' },
-        priceScaleId: 'vol',
-        scaleMargins: { top: 0.75, bottom: 0 } // Bottom 25% of the chart
-    });
+  // Fetch current day extended (for pre-market)
+  const currExtVol = await fetchExtendedData(ticker, currentDate);
+  const currPreMarket = currExtVol.filter(v => {
+    const ts = new Date(v.time * 1000);
+    const hour = ts.getHours();
+    const min = ts.getMinutes();
+    return (hour >= 4 && hour < 9) || (hour === 9 && min < 30); // 4 AM to 9:30 AM
+  }).reduce((sum, v) => sum + v.value, 0);
 
-    // Configure the 'right' price scale to confine the candlestick series to the top portion
-    chart.priceScale('right').applyOptions({
-        scaleMargins: {
-            top: 0.05,  // Start 5% from the top
-            bottom: 0.35 // End 35% from the bottom (i.e., 65% from the top)
-        }
-    });
+  return priorAfterHours + currPreMarket;
+}
 
-    // Ensure the 'vol' price scale is properly positioned in the bottom portion
-    chart.priceScale('vol').applyOptions({
-        scaleMargins: {
-            top: 0.75,  // Start 75% from the top
-            bottom: 0   // Extend to the bottom
-        }
-    });
+/* ─── Format number with suffixes ────────────────────────── */
+function formatNumber(num, isMarketCap = false) {
+  if (num < 1000) return (isMarketCap ? '$' : '') + num.toFixed(1);
+  if (num < 1000000) return (isMarketCap ? '$' : '') + (num / 1000).toFixed(1) + ' K';
+  if (num < 100000000) return (isMarketCap ? '$' : '') + (num / 1000000).toFixed(1) + ' M';
+  if (num < 1000000000) return (isMarketCap ? '$' : '') + (num / 1000000).toLocaleString('en-US', {maximumFractionDigits: 1}) + ' M';
+  if (num < 100000000000) return (isMarketCap ? '$' : '') + (num / 1000000000).toFixed(1) + ' B';
+  return (isMarketCap ? '$' : '') + (num / 1000000000).toLocaleString('en-US', {maximumFractionDigits: 1}) + ' B';
+}
 
-    const vwapSeries = chart.addLineSeries({ color: '#ffd700', lineWidth: 2 });
-    const smaSeries = chart.addLineSeries({ color: '#ff4444', lineWidth: 2 });
+/* ─── Fetch and format market cap from Polygon ────────────── */
+async function fetchMarketCap(ticker) {
+  try {
+    const {data} = await axios.get('/api/ticker-details', {params: {ticker}});
+    const marketCap = data.results.market_cap || 0;
+    return formatNumber(marketCap, true);
+  } catch (err) {
+    console.error('[marketCap] error for', ticker, err);
+    return '';
+  }
+}
 
-    /* -------- data loader -------- */
-    async function load(e) {
-        e && e.preventDefault();
-        const params = {
-            ticker: document.getElementById('ticker').value.trim(),
-            timeframe: document.getElementById('timeframe').value,
-            date: document.getElementById('date').value
-        };
-        if (!params.ticker || !params.timeframe || !params.date) {
-            alert('Fill all fields');
-            return;
-        }
-        try {
-            const { data } = await axios.get('/api/candles', { params });
-            candleSeries.setData(data.candles);
-            volumeSeries.setData(data.volume);
-            vwapSeries.setData(data.vwap);
-            smaSeries.setData(data.sma);
-            chart.timeScale().fitContent();
-        } catch (err) {
-            alert('Error: ' + (err.response?.data || err));
-        }
-    }
-    document.getElementById('form').addEventListener('submit', load);
-    load();
+/* ─── Fetch and format float from FMP ─────────────────────── */
+async function fetchFloat(ticker) {
+  try {
+    const {data} = await axios.get('/api/share-float', {params: {ticker}});
+    const floatShares = data[0]?.floatShares || 0;
+    return formatNumber(floatShares);
+  } catch (err) {
+    console.error('[float] error for', ticker, err);
+    return '';
+  }
+}
+
+/* ─── Calculate metrics for a CSV row (async for fetches) ── */
+async function calculateMetricsForRow(row){
+  if(!cachedMinCandles.length) return;
+  const rowTime=row.time;
+  if(!rowTime) return;
+
+  const h=parseInt(rowTime.slice(0,2));
+  const m=parseInt(rowTime.slice(2,4));
+  const targetMinutes=h*60+m;
+
+  const formatter=new Intl.DateTimeFormat('en-US',{
+    timeZone:'America/New_York',hour:'numeric',minute:'numeric',hour12:false});
+  const relevant=cachedMinCandles.filter(c=>{
+    const p=formatter.formatToParts(new Date(c.time*1000));
+    const hour=parseInt(p.find(x=>x.type==='hour').value);
+    const minute=parseInt(p.find(x=>x.type==='minute').value);
+    return hour*60+minute<=targetMinutes;
+  });
+  if(!relevant.length) return;
+
+  const openPrice=relevant[0].open;
+  const eodClose=cachedMinCandles[cachedMinCandles.length-1].close;
+  const highOfDay=Math.max(...cachedMinCandles.map(c=>c.high));
+  const lowOfDay =Math.min(...cachedMinCandles.map(c=>c.low));
+
+  if(!row.open_price)               row.open_price =openPrice.toFixed(2);
+  if(!row.close_price)              row.close_price=eodClose.toFixed(2);
+  if(!row.high_of_day)              row.high_of_day=highOfDay.toFixed(2);
+  if(!row.low_of_day)               row.low_of_day =lowOfDay.toFixed(2);
+
+  if(openPrice>0){
+    if(!row.percent_gain_eod)
+      row.percent_gain_eod=((eodClose-openPrice)/openPrice*100).toFixed(2);
+    if(!row.max_spiking_up_percent)
+      row.max_spiking_up_percent=((highOfDay-openPrice)/openPrice*100).toFixed(2);
+    if(!row.max_spiking_down_percent)
+      row.max_spiking_down_percent=((lowOfDay-openPrice)/openPrice*100).toFixed(2);
+  }
+
+  if(!row.volume&&cachedMinVolume.length){
+    const totalVol=cachedMinVolume.reduce((s,v)=>s+v.value,0);
+    row.volume=Math.round(totalVol).toLocaleString();
+  }
+
+  const ticker=row.ticker.toUpperCase();
+  if(!row.percent_gap_from_prior&&priorDayCloses[ticker]){
+    const prior=priorDayCloses[ticker];
+    row.percent_gap_from_prior=((openPrice-prior)/prior*100).toFixed(2);
+  }
+
+  // New: Prior day volume (RTH cumulative)
+  if(!row.prior_day_volume && priorDayVolumes[ticker]){
+    row.prior_day_volume = Math.round(priorDayVolumes[ticker]).toLocaleString();
+  }
+
+  // New: Pre-market volume (prior after + current pre)
+  if(!row.pre_market_volume){
+    const date = document.getElementById('date').value;
+    // Find priorDate (reuse logic from fetchPriorDayClose, but since already fetched, need priorDate
+    let d = new Date(date);
+    d.setDate(d.getDate() - 1);
+    while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() - 1);
+    const priorDate = d.toISOString().split('T')[0];
+
+    const preVol = await calculatePreMarketVolume(ticker, date, priorDate);
+    row.pre_market_volume = Math.round(preVol).toLocaleString();
+  }
+
+  // New: Market Cap from Polygon
+  if (!row.market_cap) {
+    row.market_cap = await fetchMarketCap(ticker);
+  }
+
+  // New: Float from FMP
+  if (!row.float) {
+    row.float = await fetchFloat(ticker);
+  }
+}
+
+/* ─── CSV upload handler ─────────────────────────────────── */
+document.getElementById('csvFile').addEventListener('change',async e=>{
+  const file=e.target.files[0]; if(!file) return;
+  const text=await file.text();
+  const p=Papa.parse(text.trim(),{header:true,skipEmptyLines:true});
+  csvData=p.data.map((r,i)=>({__row:i,...r}));
+  if(!csvData.length){alert("CSV seems empty");return;}
+
+  csvData.forEach(row=>{
+    NEW_COLUMNS.forEach(col=>{if(!(col in row)) row[col]="";});
+  });
+
+  const allFields=[...new Set([...p.meta.fields,...NEW_COLUMNS])];
+  const cols=allFields.map(h=>({
+    title:h.toUpperCase().replace(/_/g,' '),
+    field:h,
+    editor:"input",
+    minWidth:80,
+    headerSort:false,
+    headerTooltip:true          // column‑specific tooltip (redundant but safe)
+  }));
+  cols.unshift({
+    title:"#",formatter:"rownum",hozAlign:"center",width:40,frozen:true
+  });
+
+  table.setColumns(cols);
+  table.setData(csvData).then(()=>{
+    currentRow=0;
+    console.debug('[CSV] loaded',csvData.length,'rows');
+    updateTableView();
+    console.debug('[CSV] showing row',currentRow,csvData[currentRow]);
+    showSignalOnChart(csvData[currentRow]);
+  });
+});
+
+/* ─── Add Column ─────────────────────────────────────────── */
+document.getElementById('addColumn').onclick=()=>{
+  const name=document.getElementById('newColumn').value.trim();
+  if(!name) return;
+  csvData.forEach(r=>r[name]="");
+  table.addColumn({title:name,field:name,editor:"input",headerTooltip:true});
+  document.getElementById('newColumn').value="";
+};
+
+/* ─── Prev / Next navigation ─────────────────────────────── */
+document.getElementById('prevRow').onclick=()=>{
+  if(currentRow>0){
+    currentRow--;
+    console.debug('[nav] prev →',currentRow,csvData[currentRow]);
+    updateTableView(); showSignalOnChart(csvData[currentRow]);
+  }
+};
+document.getElementById('nextRow').onclick=()=>{
+  if(currentRow<csvData.length-1){
+    currentRow++;
+    console.debug('[nav] next →',currentRow,csvData[currentRow]);
+    updateTableView(); showSignalOnChart(csvData[currentRow]);
+  }
+};
+
+/* ─── Show signal on chart ───────────────────────────────── */
+function combineDateAndTime(dateStr,HHMM){
+  const h=Number(HHMM.slice(0,2)),m=Number(HHMM.slice(2));
+  return new Date(`${dateStr}T${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:00-04:00`).getTime();
+}
+async function showSignalOnChart(row){
+  console.debug('[show] row →',row);
+  document.getElementById('ticker').value=row.ticker.toUpperCase();
+  await load();                       // reload chart for this ticker/date
+
+  await calculateMetricsForRow(row);  // enrich row metrics (async)
+  table.updateData([row]);            // show updates in grid
+
+  const ts=combineDateAndTime(document.getElementById('date').value,row.time);
+  const isBuy=row.signal.toLowerCase()==="buy";
+  candleSeries.setMarkers([{
+    time:ts/1000,
+    position:isBuy?"belowBar":"aboveBar",
+    shape:isBuy?"arrowUp":"arrowDown",
+    color:isBuy?"#00ff00":"#ff3333",
+    size:2
+  }]);
+}
+
+/* ─── Export CSV ─────────────────────────────────────────── */
+document.getElementById('downloadCsv').onclick=()=>{
+  if(!csvData.length) return;
+  const out=csvData.map(({__row,...r})=>r);
+  const csv=Papa.unparse(out);
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));
+  a.download="signals_edited.csv";
+  a.click();
+};
 </script>
 </body>
 </html>
