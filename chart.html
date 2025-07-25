@@ -33,20 +33,20 @@
     }
 
     /* ─── Grid / Sheet Styling ─────────────────────────────── */
-    #metrics-sheet { margin-top:1rem; max-width:100%; overflow-x:hidden; }
+    #metrics-sheet, #news-sheet, #filings-sheet { margin-top:1rem; max-width:100%; overflow-x:hidden; }
 
     /* Header container */
-    #metrics-sheet .tabulator-header {
+    .tabulator-header {
       background:#000000;                /* solid black header bar */
     }
 
     /* Individual header cells */
-    #metrics-sheet .tabulator-col {
+    .tabulator-col {
       background:#000000;                /* ensure every header cell is black */
     }
 
     /* Header title text */
-    #metrics-sheet .tabulator-col-title {
+    .tabulator-col-title {
       color:#ffffff!important;           /* bold white text */
       font-weight:bold;
       overflow:hidden;                   /* keep a single‑line ellipsis */
@@ -55,19 +55,19 @@
       user-select:text;
     }
 
-    #metrics-sheet .tabulator-tableholder{
+    .tabulator-tableholder{
       background:#1e1e1e;
       color:#e0e0e0;
     }
 
-    #metrics-sheet .tabulator-cell{
+    .tabulator-cell{
       background:#2a2a2a;
       color:#e0e0e0;
       user-select:text;
     }
 
-    #metrics-sheet .tabulator-row-even{background-color:#252525;}
-    #metrics-sheet .tabulator-row-odd {background-color:#2a2a2a;}
+    .tabulator-row-even{background-color:#252525;}
+    .tabulator-row-odd {background-color:#2a2a2a;}
 
     /* --- Tabulator header tooltip (hover popup) --- */
     .tabulator-tooltip{
@@ -94,6 +94,12 @@
 
   <h4>Metrics (as of {{TIME}})</h4>
   <div id="metrics-sheet"></div>
+
+  <h4>News Headlines for the Day</h4>
+  <div id="news-sheet"></div>
+
+  <h4>SEC Filings for the Day</h4>
+  <div id="filings-sheet"></div>
 </div>
 
 <!-- Libraries -->
@@ -285,6 +291,49 @@ async function loadChart(){
         {title: "PRE MARKET VOLUME", field: "pre_market_volume", minWidth: 80, headerSort: false, headerTooltip: true},
       ],
     });
+
+    if(data.news && data.news.length > 0){
+      new Tabulator("#news-sheet", {
+        data: data.news,
+        layout: "fitColumns",
+        headerWordWrap: true,
+        tooltipsHeader: true,
+        tooltips: truncatedTooltip,
+        columns: [
+          {title: "PUBLISHED", field: "published", minWidth: 150, headerSort: false, headerTooltip: true, formatter: function(cell){
+            return new Date(cell.getValue()).toLocaleString();
+          }},
+          {title: "TITLE", field: "title", minWidth: 400, headerSort: false, headerTooltip: true, formatter: "link", formatterParams: {
+            urlField: "url",
+            target: "_blank",
+            labelField: "title"
+          }},
+          {title: "SOURCE", field: "source", minWidth: 150, headerSort: false, headerTooltip: true},
+        ],
+      });
+    }
+
+    if(data.filings && data.filings.length > 0){
+      new Tabulator("#filings-sheet", {
+        data: data.filings,
+        layout: "fitColumns",
+        headerWordWrap: true,
+        tooltipsHeader: true,
+        tooltips: truncatedTooltip,
+        columns: [
+          {title: "FILED AT", field: "filedAt", minWidth: 150, headerSort: false, headerTooltip: true, formatter: function(cell){
+            return new Date(cell.getValue()).toLocaleString();
+          }},
+          {title: "FORM TYPE", field: "formType", minWidth: 100, headerSort: false, headerTooltip: true},
+          {title: "DESCRIPTION", field: "description", minWidth: 400, headerSort: false, headerTooltip: true, formatter: "link", formatterParams: {
+            urlField: "linkToFilingDetails",
+            target: "_blank",
+            labelField: "description"
+          }},
+          {title: "COMPANY", field: "companyName", minWidth: 200, headerSort: false, headerTooltip: true},
+        ],
+      });
+    }
   }catch(err){
     console.error('[load] error',err);
   }

@@ -3,6 +3,7 @@ package main
 
 import (
 	_ "embed"
+	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -27,6 +29,7 @@ var (
 var (
 	polygonAPIKey string
 	fmpAPIKey     string // New for FMP
+	secAPIKey     string // New for SEC
 	listenPort    int
 )
 
@@ -70,8 +73,6 @@ type payload struct {
 	SMA9    []linePoint   `json:"sma"`
 }
 
-/* ─── New structs for APIs ────────────────────────────── */
-
 type PolygonTickerDetails struct {
   Results struct {
     MarketCap float64 `json:"market_cap"`
@@ -81,6 +82,13 @@ type PolygonTickerDetails struct {
 type FMPFloat struct {
   Symbol              string `json:"symbol"`
   FloatShares         float64 `json:"floatShares"`
+}
+
+type NewsItem struct {
+	Title     string `json:"title"`
+	Source    string `json:"source"`
+	URL       string `json:"url"`
+	Published string `json:"published"`
 }
 
 /*────────────────────  helpers  ─────────────────────────*/
@@ -104,7 +112,6 @@ func queryPolygon(sym string, mult int, span, from, to string) ([]polygonBar, er
 	return pr.Results, nil
 }
 
-/* ─── New: Query Polygon Ticker Details ──────────────────── */
 func queryPolygonTickerDetails(ticker string) (*PolygonTickerDetails, error) {
 	url := fmt.Sprintf("https://api.polygon.io/v3/reference/tickers/%s?apiKey=%s", ticker, polygonAPIKey)
 	resp, err := http.Get(url)
@@ -122,7 +129,6 @@ func queryPolygonTickerDetails(ticker string) (*PolygonTickerDetails, error) {
 	return &details, nil
 }
 
-/* ─── New: Query FMP Share Float ──────────────────────────── */
 func queryFMPFloat(ticker string) ([]FMPFloat, error) {
 	url := fmt.Sprintf("https://financialmodelingprep.com/api/v4/shares_float?symbol=%s&apikey=%s", ticker, fmpAPIKey)
 	resp, err := http.Get(url)
@@ -138,6 +144,102 @@ func queryFMPFloat(ticker string) ([]FMPFloat, error) {
 		return nil, err
 	}
 	return floats, nil
+}
+
+func queryPolygonNews(ticker, dateStr string) ([]map[string]interface{}, error) {
+	nextD := nextDay(dateStr)
+	url := fmt.Sprintf("https://api.polygon.io/benzinga/v1/news?tickers=%s&published.gte=%s&published.lt=%s&limit=50&sort=published.desc&apiKey=%s",
+		ticker, dateStr, nextD, polygonAPIKey)
+	resp, err := http.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("Polygon News: %s", resp.Status)
+	}
+	var pr struct {
+		Results []map[string]interface{} `json:"results"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&pr); err != nil {
+		return nil, err
+	}
+	return pr.Results, nil
+}
+
+func queryFMPNews(ticker, dateStr string) ([]map[string]interface{}, error) {
+	url := fmt.Sprintf("https://financialmodelingprep.com/api/v3/stock_news?tickers=%s&from=%s&to=%s&limit=50&apikey=%s",
+		ticker, dateStr, dateStr, fmpAPIKey)
+	resp, err := http.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("FMP News: %s", resp.Status)
+	}
+	var news []map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&news); err != nil {
+		return nil, err
+	}
+	return news, nil
+}
+
+func querySECFilings(ticker, dateStr string) ([]map[string]interface{}, error) {
+	payload := map[string]interface{}{
+		"query": fmt.Sprintf("ticker:%s AND filedAt:[%s TO %s]", ticker, dateStr, dateStr),
+		"from":  "0",
+		"size":  "50",
+		"sort":  []map[string]map[string]string{{"filedAt": {"order": "desc"}}},
+	}
+	jsonPayload, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", "https://api.sec-api.io?token="+secAPIKey, bytes.NewBuffer(jsonPayload))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("SEC API: %s", resp.Status)
+	}
+
+	var result struct {
+		Filings []map[string]interface{} `json:"filings"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+
+	return result.Filings, nil
+}
+
+func nextDay(dateStr string) string {
+	t, err := time.Parse("2006-01-02", dateStr)
+	if err != nil {
+		return ""
+	}
+	return t.Add(24 * time.Hour).Format("2006-01-02")
+}
+
+func parsePublished(s string) time.Time {
+	if strings.Contains(s, "T") {
+		t, _ := time.Parse(time.RFC3339, s)
+		return t
+	} else {
+		t, _ := time.Parse("2006-01-02 15:04:05", s)
+		return t
+	}
 }
 
 func openBrowser(u string) {
@@ -232,7 +334,6 @@ func candlesHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(out)
 }
 
-/* ─── New Handler: Ticker Details (Polygon Proxy) ────────── */
 func tickerDetailsHandler(w http.ResponseWriter, r *http.Request) {
 	ticker := strings.ToUpper(r.URL.Query().Get("ticker"))
 	if ticker == "" {
@@ -250,7 +351,6 @@ func tickerDetailsHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(details)
 }
 
-/* ─── New Handler: Share Float (FMP Proxy) ────────────────── */
 func shareFloatHandler(w http.ResponseWriter, r *http.Request) {
 	ticker := strings.ToUpper(r.URL.Query().Get("ticker"))
 	if ticker == "" {
@@ -268,7 +368,6 @@ func shareFloatHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(floats)
 }
 
-/* ─── New Handler: Chart Endpoint ────────────────────────── */
 func chartHandler(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	date := q.Get("date")
@@ -277,21 +376,17 @@ func chartHandler(w http.ResponseWriter, r *http.Request) {
 	signal := q.Get("signal")
 	resolution := q.Get("resolution")
 	
-	// Validate required params
 	if date == "" || ticker == "" || timeStr == "" || signal == "" {
 		http.Error(w, "date, ticker, time, and signal are required", 400)
 		return
 	}
 	
-	// Default resolution to 1m if not specified
 	if resolution == "" {
 		resolution = "1m"
 	}
 	
-	// Serve the chart HTML with parameters embedded
 	w.Header().Set("Content-Type", "text/html")
 	
-	// Replace placeholders in the HTML
 	html := strings.ReplaceAll(chartHTML, "{{DATE}}", date)
 	html = strings.ReplaceAll(html, "{{TICKER}}", ticker)
 	html = strings.ReplaceAll(html, "{{TIME}}", timeStr)
@@ -301,12 +396,11 @@ func chartHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprint(w, html)
 }
 
-/* ─── New Handler: Chart Data Endpoint ───────────────────── */
 func chartDataHandler(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	symbol := strings.ToUpper(q.Get("ticker"))
 	dateStr := q.Get("date")
-	timeStr := q.Get("time") // HHMM format
+	timeStr := q.Get("time") 
 	tf := strings.ToLower(strings.TrimSpace(q.Get("resolution")))
 	
 	if symbol == "" || dateStr == "" || timeStr == "" {
@@ -314,12 +408,10 @@ func chartDataHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	
-	// Default to 1m if not specified
 	if tf == "" {
 		tf = "1m"
 	}
 	
-	// Parse the target time
 	if len(timeStr) != 4 {
 		http.Error(w, "time must be in HHMM format", 400)
 		return
@@ -328,7 +420,6 @@ func chartDataHandler(w http.ResponseWriter, r *http.Request) {
 	targetHour, _ := strconv.Atoi(timeStr[:2])
 	targetMinute, _ := strconv.Atoi(timeStr[2:])
 	
-	// Get 1-minute bars for the day
 	minBars, err := queryPolygon(symbol, 1, "minute", dateStr, dateStr)
 	if err != nil {
 		http.Error(w, err.Error(), 502)
@@ -337,7 +428,6 @@ func chartDataHandler(w http.ResponseWriter, r *http.Request) {
 	
 	loc, _ := time.LoadLocation("America/New_York")
 	
-	// Filter bars up to target time and extend if needed
 	var lastClose float64
 	var lastTime int64
 	extendedCandles := make([]candlePoint, 0)
@@ -347,12 +437,10 @@ func chartDataHandler(w http.ResponseWriter, r *http.Request) {
 		ts := time.UnixMilli(b.T).In(loc)
 		h, m := ts.Hour(), ts.Minute()
 		
-		// Skip pre-market and after-hours
 		if h < 9 || (h == 9 && m < 30) || h >= 16 {
 			continue
 		}
 		
-		// If we're past the target time, stop processing real data
 		if h > targetHour || (h == targetHour && m > targetMinute) {
 			break
 		}
@@ -368,12 +456,9 @@ func chartDataHandler(w http.ResponseWriter, r *http.Request) {
 		lastTime = b.T
 	}
 	
-	// If we have data and haven't reached 4pm, extend with flat candles
 	if len(extendedCandles) > 0 && targetHour < 16 {
-		// Start from the next minute after the last real candle
 		extendTime := time.UnixMilli(lastTime).In(loc).Add(time.Minute)
 		
-		// Generate flat candles up to 4pm
 		for extendTime.Hour() < 16 {
 			if extendTime.Hour() >= 9 && (extendTime.Hour() > 9 || extendTime.Minute() >= 30) {
 				extendedCandles = append(extendedCandles, candlePoint{
@@ -388,7 +473,6 @@ func chartDataHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	
-	// Process according to requested timeframe
 	var candles []candlePoint
 	var vol []linePoint
 	
@@ -396,7 +480,6 @@ func chartDataHandler(w http.ResponseWriter, r *http.Request) {
 		candles = extendedCandles
 		vol = extendedVolume
 	} else {
-		// Aggregate to requested timeframe
 		var mult int
 		switch tf {
 		case "2m": mult = 2
@@ -411,7 +494,6 @@ func chartDataHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		
-		// Group candles by timeframe
 		for i := 0; i < len(extendedCandles); i += mult {
 			end := i + mult
 			if end > len(extendedCandles) {
@@ -426,10 +508,6 @@ func chartDataHandler(w http.ResponseWriter, r *http.Request) {
 			l := group[0].Low
 			c := group[len(group)-1].Close
 			v := 0.0
-			for _, g := range group {
-				if g.High > h { h = g.High }
-				if g.Low < l { l = g.Low }
-			}
 			for j := i; j < end && j < len(extendedVolume); j++ {
 				v += extendedVolume[j].Value
 			}
@@ -440,7 +518,6 @@ func chartDataHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	
-	// Calculate VWAP and SMA using the extended 1-minute data
 	var cumPV, cumV float64
 	vwap := make([]linePoint, 0)
 
@@ -455,7 +532,6 @@ func chartDataHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	
-	// SMA-9 on the aggregated candles
 	var sum float64
 	sma := make([]linePoint, 0)
 	for i, c := range candles {
@@ -464,32 +540,116 @@ func chartDataHandler(w http.ResponseWriter, r *http.Request) {
 		if i >= 8 { sma = append(sma, linePoint{Time: c.Time, Value: sum / 9}) }
 	}
 	
-	// Get prior day data for calculations
 	priorClose, priorVolume := getPriorDayData(symbol, dateStr)
 	
-	// Calculate metrics using data up to target time
 	metrics := calculateMetrics(extendedCandles, extendedVolume, priorClose, priorVolume)
 	
+	// Fetch news
+	pNews, _ := queryPolygonNews(symbol, dateStr)
+	fNews, _ := queryFMPNews(symbol, dateStr)
+	allNews := []NewsItem{}
+	for _, p := range pNews {
+		val, exists := p["title"]
+		if !exists || val == nil {
+			continue
+		}
+		title, ok := val.(string)
+		if !ok { continue }
+
+		val, exists = p["url"]
+		if !exists || val == nil {
+			continue
+		}
+		url, ok := val.(string)
+		if !ok { continue }
+
+		val, exists = p["published"]
+		if !exists || val == nil {
+			continue
+		}
+		pub, ok := val.(string)
+		if !ok { continue }
+
+		allNews = append(allNews, NewsItem{
+			Title:     title,
+			Source:    "Benzinga",
+			URL:       url,
+			Published: pub,
+		})
+	}
+	for _, f := range fNews {
+		val, exists := f["title"]
+		if !exists || val == nil {
+			continue
+		}
+		title, ok := val.(string)
+		if !ok { continue }
+
+		val, exists = f["site"]
+		if !exists || val == nil {
+			continue
+		}
+		site, ok := val.(string)
+		if !ok { continue }
+
+		val, exists = f["url"]
+		if !exists || val == nil {
+			continue
+		}
+		url, ok := val.(string)
+		if !ok { continue }
+
+		val, exists = f["publishedDate"]
+		if !exists || val == nil {
+			continue
+		}
+		pub, ok := val.(string)
+		if !ok { continue }
+
+		allNews = append(allNews, NewsItem{
+			Title:     title,
+			Source:    site,
+			URL:       url,
+			Published: pub,
+		})
+	}
+	uniqueMap := make(map[string]NewsItem)
+	for _, n := range allNews {
+		uniqueMap[n.URL] = n
+	}
+	uniqueNews := []NewsItem{}
+	for _, n := range uniqueMap {
+		uniqueNews = append(uniqueNews, n)
+	}
+	sort.Slice(uniqueNews, func(i, j int) bool {
+		ti := parsePublished(uniqueNews[i].Published)
+		tj := parsePublished(uniqueNews[j].Published)
+		return ti.After(tj)
+	})
+
+	// Fetch SEC filings
+	filings, _ := querySECFilings(symbol, dateStr)
+	
 	out := map[string]interface{}{
-		"candles": candles,
-		"volume": vol,
+		"candles":    candles,
+		"volume":     vol,
 		"minCandles": extendedCandles,
-		"minVolume": extendedVolume,
-		"vwap": vwap,
-		"sma": sma,
-		"metrics": metrics,
+		"minVolume":  extendedVolume,
+		"vwap":       vwap,
+		"sma":        sma,
+		"metrics":    metrics,
+		"news":       uniqueNews,
+		"filings":    filings,
 	}
 	
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(out)
 }
 
-/* ─── Helper: Get Prior Day Data ─────────────────────────── */
 func getPriorDayData(ticker, dateStr string) (float64, float64) {
 	date, _ := time.Parse("2006-01-02", dateStr)
 	loc, _ := time.LoadLocation("America/New_York")
 	
-	// Go back to find prior trading day
 	for i := 0; i < 10; i++ {
 		date = date.AddDate(0, 0, -1)
 		if date.Weekday() == time.Saturday || date.Weekday() == time.Sunday {
@@ -502,7 +662,6 @@ func getPriorDayData(ticker, dateStr string) (float64, float64) {
 			continue
 		}
 		
-		// Find last RTH bar
 		var lastClose float64
 		var totalVolume float64
 		
@@ -523,7 +682,6 @@ func getPriorDayData(ticker, dateStr string) (float64, float64) {
 	return 0, 0
 }
 
-/* ─── Helper: Calculate Metrics ──────────────────────────── */
 func calculateMetrics(candles []candlePoint, volumes []linePoint, priorClose, priorVolume float64) map[string]string {
 	if len(candles) == 0 {
 		return map[string]string{}
@@ -586,6 +744,9 @@ func main() {
 
 	fmpAPIKey = os.Getenv("FMP_API_KEY")
 	if fmpAPIKey == "" { log.Fatal("FMP API key missing") }
+
+	secAPIKey = os.Getenv("SEC_API_KEY")
+	if secAPIKey == "" { log.Fatal("SEC API key missing") }
 
 	if *portFlag!=0 { listenPort=*portFlag
 	} else if p:=os.Getenv("PORT"); p!="" { fmt.Sscanf(p,"%d",&listenPort) }
