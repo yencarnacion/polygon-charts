@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <title>Chart - {{TICKER}} {{DATE}} {{TIME}}</title>
+
+  <!-- Bootstrap -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+
+  <!-- Tabulator CSS -->
+  <link href="https://cdn.jsdelivr.net/npm/tabulator-tables@5.4.4/dist/css/tabulator.min.css" rel="stylesheet"/>
+
+  <style>
+    body { margin:1rem; background:#121212; color:#e0e0e0 }
+    #chart { height:600px; margin-bottom: 2rem; }
+    
+    .signal-info {
+      background: #1e1e1e;
+      border: 1px solid #444;
+      padding: 1rem;
+      border-radius: 8px;
+      margin-bottom: 1rem;
+    }
+    
+    .signal-buy {
+      color: #26a69a;
+      font-weight: bold;
+    }
+    
+    .signal-sell {
+      color: #ef5350;
+      font-weight: bold;
+    }
+
+    /* ─── Grid / Sheet Styling ─────────────────────────────── */
+    #metrics-sheet { margin-top:1rem; max-width:100%; overflow-x:hidden; }
+
+    /* Header container */
+    #metrics-sheet .tabulator-header {
+      background:#000000;                /* solid black header bar */
+    }
+
+    /* Individual header cells */
+    #metrics-sheet .tabulator-col {
+      background:#000000;                /* ensure every header cell is black */
+    }
+
+    /* Header title text */
+    #metrics-sheet .tabulator-col-title {
+      color:#ffffff!important;           /* bold white text */
+      font-weight:bold;
+      overflow:hidden;                   /* keep a single‑line ellipsis */
+      text-overflow:ellipsis;
+      white-space:nowrap;
+      user-select:text;
+    }
+
+    #metrics-sheet .tabulator-tableholder{
+      background:#1e1e1e;
+      color:#e0e0e0;
+    }
+
+    #metrics-sheet .tabulator-cell{
+      background:#2a2a2a;
+      color:#e0e0e0;
+      user-select:text;
+    }
+
+    #metrics-sheet .tabulator-row-even{background-color:#252525;}
+    #metrics-sheet .tabulator-row-odd {background-color:#2a2a2a;}
+
+    /* --- Tabulator header tooltip (hover popup) --- */
+    .tabulator-tooltip{
+      background:#000 !important;   /* black background  */
+      color:#fff !important;        /* bold white text   */
+      font-weight:bold;             /* make text bold    */
+      z-index: 9999;
+      max-width: 600px;
+      white-space: pre-line;
+      word-break: break-all;
+    }
+
+  </style>
+</head>
+<body>
+
+<div class="container-fluid">
+  <div class="signal-info">
+    <h3>{{TICKER}} - {{DATE}} at {{TIME}}</h3>
+    <p>Signal: <span class="signal-{{SIGNAL}}">{{SIGNAL}}</span> | Resolution: {{RESOLUTION}}</p>
+  </div>
+
+  <div id="chart" class="border rounded"></div>
+
+  <h4>Metrics (as of {{TIME}})</h4>
+  <div id="metrics-sheet"></div>
+</div>
+
+<!-- Libraries -->
+<script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.0.0/dist/lightweight-charts.standalone.production.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tabulator-tables@5.4.4/dist/js/tabulator.min.js"></script>
+
+<script>
+/* ─── Chart setup ─────────────────────────────────────────── */
+const chart = LightweightCharts.createChart(document.getElementById('chart'),{
+  layout:{background:{color:'#1e1e1e'},textColor:'#cccccc'},
+  grid:{vertLines:{color:'#2e2e2e'},horzLines:{color:'#2e2e2e'}},
+  timeScale:{timeVisible:true,secondsVisible:false,
+    tickMarkFormatter:t=>new Date(t*1000).toLocaleTimeString(
+      'en-US',{timeZone:'America/New_York',hour12:false,hour:'2-digit',minute:'2-digit'})}
+});
+const candleSeries = chart.addCandlestickSeries({
+  upColor:'#26a69a',downColor:'#ef5350',
+  wickUpColor:'#26a69a',wickDownColor:'#ef5350',borderVisible:false});
+const volumeSeries = chart.addHistogramSeries({
+  color:'#888',priceFormat:{type:'volume'},
+  priceScaleId:'vol',scaleMargins:{top:0.75,bottom:0}});
+chart.priceScale('right').applyOptions({scaleMargins:{top:0.05,bottom:0.35}});
+chart.priceScale('vol').applyOptions({scaleMargins:{top:0.75,bottom:0}});
+const vwapSeries = chart.addLineSeries({color:'#ffd700',lineWidth:2});
+const smaSeries  = chart.addLineSeries({color:'#ff4444',lineWidth:2});
+
+const date = "{{DATE}}";
+const ticker = "{{TICKER}}";
+const timeStr = "{{TIME}}";
+const signal = "{{SIGNAL}}".toLowerCase();
+const timeframe = "{{RESOLUTION}}";
+
+const NEW_COLUMNS = [
+  'market_cap','float','open_price','close_price','high_of_day','low_of_day',
+  'percent_gain_eod','max_spiking_up_percent','max_spiking_down_percent',
+  'volume','percent_gap_from_prior', 'prior_day_volume', 'pre_market_volume'
+];
+
+/* ─── Tooltip only for truncated cell values ──────────────── */
+function truncatedTooltip(cell){
+  const el = cell.getElement();
+  if (el && el.scrollWidth > el.clientWidth) {
+    return cell.getValue();
+  }
+  return false;
+}
+
+/* ─── Fetch extended hours data for pre/after market ────── */
+async function fetchExtendedData(ticker, date){
+  console.debug('[extended] fetching for', ticker, date);
+  try {
+    const {data} = await axios.get('/api/candles', {
+      params: {ticker, timeframe: '1m', date, extended: 'true'}
+    });
+    return data.minVolume;
+  } catch (err) {
+    console.error('[extended] error', err);
+    return [];
+  }
+}
+
+/* ─── Calculate pre-market volume ────────────────────────── */
+async function calculatePreMarketVolume(ticker, currentDate, priorDate){
+  const priorExtVol = await fetchExtendedData(ticker, priorDate);
+  const priorAfterHours = priorExtVol.filter(v => {
+    const ts = new Date(v.time * 1000);
+    const hour = ts.getHours();
+    return hour >= 16 && hour < 20;
+  }).reduce((sum, v) => sum + v.value, 0);
+
+  const currExtVol = await fetchExtendedData(ticker, currentDate);
+  const currPreMarket = currExtVol.filter(v => {
+    const ts = new Date(v.time * 1000);
+    const hour = ts.getHours();
+    const min = ts.getMinutes();
+    return (hour >= 4 && hour < 9) || (hour === 9 && min < 30);
+  }).reduce((sum, v) => sum + v.value, 0);
+
+  return priorAfterHours + currPreMarket;
+}
+
+/* ─── Format number with suffixes ────────────────────────── */
+function formatNumber(num, isMarketCap = false) {
+  if (num < 1000) return (isMarketCap ? '$' : '') + num.toFixed(1);
+  if (num < 1000000) return (isMarketCap ? '$' : '') + (num / 1000).toFixed(1) + ' K';
+  if (num < 100000000) return (isMarketCap ? '$' : '') + (num / 1000000).toFixed(1) + ' M';
+  if (num < 1000000000) return (isMarketCap ? '$' : '') + (num / 1000000).toLocaleString('en-US', {maximumFractionDigits: 1}) + ' M';
+  if (num < 100000000000) return (isMarketCap ? '$' : '') + (num / 1000000000).toFixed(1) + ' B';
+  return (isMarketCap ? '$' : '') + (num / 1000000000).toLocaleString('en-US', {maximumFractionDigits: 1}) + ' B';
+}
+
+/* ─── Fetch and format market cap from Polygon ────────────── */
+async function fetchMarketCap(ticker) {
+  try {
+    const {data} = await axios.get('/api/ticker-details', {params: {ticker}});
+    const marketCap = data.results.market_cap || 0;
+    return formatNumber(marketCap, true);
+  } catch (err) {
+    console.error('[marketCap] error for', ticker, err);
+    return '';
+  }
+}
+
+/* ─── Fetch and format float from FMP ─────────────────────── */
+async function fetchFloat(ticker) {
+  try {
+    const {data} = await axios.get('/api/share-float', {params: {ticker}});
+    const floatShares = data[0]?.floatShares || 0;
+    return formatNumber(floatShares);
+  } catch (err) {
+    console.error('[float] error for', ticker, err);
+    return '';
+  }
+}
+
+async function loadChart(){
+  try{
+    const {data}=await axios.get('/api/chart-data',{params:{ticker, timeframe, date, time:timeStr}});
+    candleSeries.setData(data.candles);
+    volumeSeries.setData(data.volume);
+    vwapSeries.setData(data.vwap);
+    smaSeries.setData(data.sma);
+
+    const ts=combineDateAndTime(date,timeStr)/1000;
+    const isBuy=signal==="buy";
+    candleSeries.setMarkers([{
+      time:ts,
+      position:isBuy?"belowBar":"aboveBar",
+      shape:isBuy?"arrowUp":"arrowDown",
+      color:isBuy?"#00ff00":"#ff3333",
+      size:2
+    }]);
+    chart.timeScale().fitContent();
+
+    const metrics = data.metrics;
+
+    let d = new Date(date);
+    d.setDate(d.getDate() - 1);
+    while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() - 1);
+    const priorDate = d.toISOString().split('T')[0];
+
+    const preVol = await calculatePreMarketVolume(ticker, date, priorDate);
+
+    const row = {
+      ticker,
+      time: timeStr,
+      signal: signal.toUpperCase(),
+      market_cap: await fetchMarketCap(ticker),
+      'float': await fetchFloat(ticker),
+      open_price: metrics.open_price || '-',
+      close_price: metrics.close_price || '-',
+      high_of_day: metrics.high_of_day || '-',
+      low_of_day: metrics.low_of_day || '-',
+      percent_gain_eod: metrics.percent_gain_eod || '-',
+      max_spiking_up_percent: metrics.max_spiking_up_percent || '-',
+      max_spiking_down_percent: metrics.max_spiking_down_percent || '-',
+      volume: parseFloat(metrics.volume || '0').toLocaleString(),
+      percent_gap_from_prior: metrics.percent_gap_from_prior || '-',
+      prior_day_volume: parseFloat(metrics.prior_day_volume || '0').toLocaleString(),
+      pre_market_volume: Math.round(preVol).toLocaleString(),
+    };
+
+    new Tabulator("#metrics-sheet", {
+      data: [row],
+      layout: "fitColumns",
+      headerWordWrap: true,
+      tooltipsHeader: true,
+      tooltips: truncatedTooltip,
+      columns: [
+        {title: "TICKER", field: "ticker", minWidth: 80, headerSort: false, headerTooltip: true},
+        {title: "TIME", field: "time", minWidth: 80, headerSort: false, headerTooltip: true},
+        {title: "SIGNAL", field: "signal", minWidth: 80, headerSort: false, headerTooltip: true, formatter: function(cell) {
+          const val = cell.getValue().toLowerCase();
+          return `<span class="signal-${val}">${val.toUpperCase()}</span>`;
+        }},
+        {title: "MARKET CAP", field: "market_cap", minWidth: 80, headerSort: false, headerTooltip: true},
+        {title: "FLOAT", field: "float", minWidth: 80, headerSort: false, headerTooltip: true},
+        {title: "OPEN PRICE", field: "open_price", minWidth: 80, headerSort: false, headerTooltip: true},
+        {title: "CLOSE PRICE", field: "close_price", minWidth: 80, headerSort: false, headerTooltip: true},
+        {title: "HIGH OF DAY", field: "high_of_day", minWidth: 80, headerSort: false, headerTooltip: true},
+        {title: "LOW OF DAY", field: "low_of_day", minWidth: 80, headerSort: false, headerTooltip: true},
+        {title: "PERCENT GAIN EOD", field: "percent_gain_eod", minWidth: 80, headerSort: false, headerTooltip: true},
+        {title: "MAX SPIKING UP PERCENT", field: "max_spiking_up_percent", minWidth: 80, headerSort: false, headerTooltip: true},
+        {title: "MAX SPIKING DOWN PERCENT", field: "max_spiking_down_percent", minWidth: 80, headerSort: false, headerTooltip: true},
+        {title: "VOLUME", field: "volume", minWidth: 80, headerSort: false, headerTooltip: true},
+        {title: "PERCENT GAP FROM PRIOR", field: "percent_gap_from_prior", minWidth: 80, headerSort: false, headerTooltip: true},
+        {title: "PRIOR DAY VOLUME", field: "prior_day_volume", minWidth: 80, headerSort: false, headerTooltip: true},
+        {title: "PRE MARKET VOLUME", field: "pre_market_volume", minWidth: 80, headerSort: false, headerTooltip: true},
+      ],
+    });
+  }catch(err){
+    console.error('[load] error',err);
+  }
+}
+
+function combineDateAndTime(dateStr,HHMM){
+  const h=Number(HHMM.slice(0,2)),m=Number(HHMM.slice(2));
+  return new Date(`${dateStr}T${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:00-04:00`).getTime();
+}
+
+loadChart();
+</script>
+</body>
+</html>

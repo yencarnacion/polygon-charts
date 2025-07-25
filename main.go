@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
@@ -33,6 +34,9 @@ var (
 
 //go:embed index.html
 var indexHTML string
+
+//go:embed chart.html
+var chartHTML string
 
 /*────────────────────  data structures  ──────────────────*/
 
@@ -264,6 +268,312 @@ func shareFloatHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(floats)
 }
 
+/* ─── New Handler: Chart Endpoint ────────────────────────── */
+func chartHandler(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	date := q.Get("date")
+	ticker := strings.ToUpper(q.Get("ticker"))
+	timeStr := q.Get("time")
+	signal := q.Get("signal")
+	resolution := q.Get("resolution")
+	
+	// Validate required params
+	if date == "" || ticker == "" || timeStr == "" || signal == "" {
+		http.Error(w, "date, ticker, time, and signal are required", 400)
+		return
+	}
+	
+	// Default resolution to 1m if not specified
+	if resolution == "" {
+		resolution = "1m"
+	}
+	
+	// Serve the chart HTML with parameters embedded
+	w.Header().Set("Content-Type", "text/html")
+	
+	// Replace placeholders in the HTML
+	html := strings.ReplaceAll(chartHTML, "{{DATE}}", date)
+	html = strings.ReplaceAll(html, "{{TICKER}}", ticker)
+	html = strings.ReplaceAll(html, "{{TIME}}", timeStr)
+	html = strings.ReplaceAll(html, "{{SIGNAL}}", signal)
+	html = strings.ReplaceAll(html, "{{RESOLUTION}}", resolution)
+	
+	fmt.Fprint(w, html)
+}
+
+/* ─── New Handler: Chart Data Endpoint ───────────────────── */
+func chartDataHandler(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	symbol := strings.ToUpper(q.Get("ticker"))
+	dateStr := q.Get("date")
+	timeStr := q.Get("time") // HHMM format
+	tf := strings.ToLower(strings.TrimSpace(q.Get("resolution")))
+	
+	if symbol == "" || dateStr == "" || timeStr == "" {
+		http.Error(w, "ticker, date, and time required", 400)
+		return
+	}
+	
+	// Default to 1m if not specified
+	if tf == "" {
+		tf = "1m"
+	}
+	
+	// Parse the target time
+	if len(timeStr) != 4 {
+		http.Error(w, "time must be in HHMM format", 400)
+		return
+	}
+	
+	targetHour, _ := strconv.Atoi(timeStr[:2])
+	targetMinute, _ := strconv.Atoi(timeStr[2:])
+	
+	// Get 1-minute bars for the day
+	minBars, err := queryPolygon(symbol, 1, "minute", dateStr, dateStr)
+	if err != nil {
+		http.Error(w, err.Error(), 502)
+		return
+	}
+	
+	loc, _ := time.LoadLocation("America/New_York")
+	
+	// Filter bars up to target time and extend if needed
+	var lastClose float64
+	var lastTime int64
+	extendedCandles := make([]candlePoint, 0)
+	extendedVolume := make([]linePoint, 0)
+	
+	for _, b := range minBars {
+		ts := time.UnixMilli(b.T).In(loc)
+		h, m := ts.Hour(), ts.Minute()
+		
+		// Skip pre-market and after-hours
+		if h < 9 || (h == 9 && m < 30) || h >= 16 {
+			continue
+		}
+		
+		// If we're past the target time, stop processing real data
+		if h > targetHour || (h == targetHour && m > targetMinute) {
+			break
+		}
+		
+		extendedCandles = append(extendedCandles, candlePoint{
+			Time: b.T/1000, Open: b.O, High: b.H, Low: b.L, Close: b.C,
+		})
+		extendedVolume = append(extendedVolume, linePoint{
+			Time: b.T/1000, Value: b.V,
+		})
+		
+		lastClose = b.C
+		lastTime = b.T
+	}
+	
+	// If we have data and haven't reached 4pm, extend with flat candles
+	if len(extendedCandles) > 0 && targetHour < 16 {
+		// Start from the next minute after the last real candle
+		extendTime := time.UnixMilli(lastTime).In(loc).Add(time.Minute)
+		
+		// Generate flat candles up to 4pm
+		for extendTime.Hour() < 16 {
+			if extendTime.Hour() >= 9 && (extendTime.Hour() > 9 || extendTime.Minute() >= 30) {
+				extendedCandles = append(extendedCandles, candlePoint{
+					Time: extendTime.Unix(),
+					Open: lastClose, High: lastClose, Low: lastClose, Close: lastClose,
+				})
+				extendedVolume = append(extendedVolume, linePoint{
+					Time: extendTime.Unix(), Value: 0,
+				})
+			}
+			extendTime = extendTime.Add(time.Minute)
+		}
+	}
+	
+	// Process according to requested timeframe
+	var candles []candlePoint
+	var vol []linePoint
+	
+	if tf == "1m" {
+		candles = extendedCandles
+		vol = extendedVolume
+	} else {
+		// Aggregate to requested timeframe
+		var mult int
+		switch tf {
+		case "2m": mult = 2
+		case "3m": mult = 3
+		case "5m": mult = 5
+		case "10m": mult = 10
+		case "15m": mult = 15
+		case "30m": mult = 30
+		case "1h": mult = 60
+		default:
+			http.Error(w, "unsupported timeframe", 400)
+			return
+		}
+		
+		// Group candles by timeframe
+		for i := 0; i < len(extendedCandles); i += mult {
+			end := i + mult
+			if end > len(extendedCandles) {
+				end = len(extendedCandles)
+			}
+			group := extendedCandles[i:end]
+			if len(group) == 0 {
+				continue
+			}
+			o := group[0].Open
+			h := group[0].High
+			l := group[0].Low
+			c := group[len(group)-1].Close
+			v := 0.0
+			for _, g := range group {
+				if g.High > h { h = g.High }
+				if g.Low < l { l = g.Low }
+			}
+			for j := i; j < end && j < len(extendedVolume); j++ {
+				v += extendedVolume[j].Value
+			}
+			candles = append(candles, candlePoint{
+				Time: group[0].Time, Open: o, High: h, Low: l, Close: c,
+			})
+			vol = append(vol, linePoint{Time: group[0].Time, Value: v})
+		}
+	}
+	
+	// Calculate VWAP and SMA using the extended 1-minute data
+	var cumPV, cumV float64
+	vwap := make([]linePoint, 0)
+
+	for i, c := range extendedCandles {
+		if i < len(extendedVolume) {
+			typ := (c.High + c.Low + c.Close) / 3
+			cumPV += typ * extendedVolume[i].Value
+			cumV += extendedVolume[i].Value
+			if cumV > 0 {
+				vwap = append(vwap, linePoint{Time: c.Time, Value: cumPV / cumV})
+			}
+		}
+	}
+	
+	// SMA-9 on the aggregated candles
+	var sum float64
+	sma := make([]linePoint, 0)
+	for i, c := range candles {
+		sum += c.Close
+		if i >= 9 { sum -= candles[i-9].Close }
+		if i >= 8 { sma = append(sma, linePoint{Time: c.Time, Value: sum / 9}) }
+	}
+	
+	// Get prior day data for calculations
+	priorClose, priorVolume := getPriorDayData(symbol, dateStr)
+	
+	// Calculate metrics using data up to target time
+	metrics := calculateMetrics(extendedCandles, extendedVolume, priorClose, priorVolume)
+	
+	out := map[string]interface{}{
+		"candles": candles,
+		"volume": vol,
+		"minCandles": extendedCandles,
+		"minVolume": extendedVolume,
+		"vwap": vwap,
+		"sma": sma,
+		"metrics": metrics,
+	}
+	
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(out)
+}
+
+/* ─── Helper: Get Prior Day Data ─────────────────────────── */
+func getPriorDayData(ticker, dateStr string) (float64, float64) {
+	date, _ := time.Parse("2006-01-02", dateStr)
+	loc, _ := time.LoadLocation("America/New_York")
+	
+	// Go back to find prior trading day
+	for i := 0; i < 10; i++ {
+		date = date.AddDate(0, 0, -1)
+		if date.Weekday() == time.Saturday || date.Weekday() == time.Sunday {
+			continue
+		}
+		
+		priorDateStr := date.Format("2006-01-02")
+		bars, err := queryPolygon(ticker, 1, "minute", priorDateStr, priorDateStr)
+		if err != nil || len(bars) == 0 {
+			continue
+		}
+		
+		// Find last RTH bar
+		var lastClose float64
+		var totalVolume float64
+		
+		for _, b := range bars {
+			ts := time.UnixMilli(b.T).In(loc)
+			h, m := ts.Hour(), ts.Minute()
+			if h >= 9 && (h > 9 || m >= 30) && h < 16 {
+				lastClose = b.C
+				totalVolume += b.V
+			}
+		}
+		
+		if lastClose > 0 {
+			return lastClose, totalVolume
+		}
+	}
+	
+	return 0, 0
+}
+
+/* ─── Helper: Calculate Metrics ──────────────────────────── */
+func calculateMetrics(candles []candlePoint, volumes []linePoint, priorClose, priorVolume float64) map[string]string {
+	if len(candles) == 0 {
+		return map[string]string{}
+	}
+	
+	open := candles[0].Open
+	close := candles[len(candles)-1].Close
+	high := candles[0].High
+	low := candles[0].Low
+	
+	for _, c := range candles {
+		if c.High > high { high = c.High }
+		if c.Low < low { low = c.Low }
+	}
+	
+	totalVolume := 0.0
+	for _, v := range volumes {
+		totalVolume += v.Value
+	}
+	
+	metrics := map[string]string{
+		"open_price": fmt.Sprintf("%.2f", open),
+		"close_price": fmt.Sprintf("%.2f", close),
+		"high_of_day": fmt.Sprintf("%.2f", high),
+		"low_of_day": fmt.Sprintf("%.2f", low),
+		"volume": fmt.Sprintf("%.0f", totalVolume),
+	}
+	
+	if open > 0 {
+		percentGain := (close - open) / open * 100
+		maxSpikingUp := (high - open) / open * 100
+		maxSpikingDown := (low - open) / open * 100
+		
+		metrics["percent_gain_eod"] = fmt.Sprintf("%.2f", percentGain)
+		metrics["max_spiking_up_percent"] = fmt.Sprintf("%.2f", maxSpikingUp)
+		metrics["max_spiking_down_percent"] = fmt.Sprintf("%.2f", maxSpikingDown)
+	}
+	
+	if priorClose > 0 {
+		gap := (open - priorClose) / priorClose * 100
+		metrics["percent_gap_from_prior"] = fmt.Sprintf("%.2f", gap)
+	}
+	
+	if priorVolume > 0 {
+		metrics["prior_day_volume"] = fmt.Sprintf("%.0f", priorVolume)
+	}
+	
+	return metrics
+}
+
 /*────────────────────  main  ───────────────────────────*/
 
 func main() {
@@ -285,6 +595,8 @@ func main() {
 	http.HandleFunc("/api/candles", candlesHandler)
 	http.HandleFunc("/api/ticker-details", tickerDetailsHandler) // New
 	http.HandleFunc("/api/share-float", shareFloatHandler)       // New
+	http.HandleFunc("/chart", chartHandler)                      // New chart endpoint
+	http.HandleFunc("/api/chart-data", chartDataHandler)         // New chart data endpoint
 
 	addr := fmt.Sprintf(":%d", listenPort)
 	go func(){ time.Sleep(500*time.Millisecond); openBrowser("http://localhost"+addr) }()

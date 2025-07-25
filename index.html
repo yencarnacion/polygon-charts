@@ -375,9 +375,9 @@ async function calculateMetricsForRow(row){
   if(!relevant.length) return;
 
   const openPrice=relevant[0].open;
-  const eodClose=cachedMinCandles[cachedMinCandles.length-1].close;
-  const highOfDay=Math.max(...cachedMinCandles.map(c=>c.high));
-  const lowOfDay =Math.min(...cachedMinCandles.map(c=>c.low));
+  const eodClose=relevant[relevant.length-1].close;
+  const highOfDay=Math.max(...relevant.map(c=>c.high));
+  const lowOfDay =Math.min(...relevant.map(c=>c.low));
 
   if(!row.open_price)               row.open_price =openPrice.toFixed(2);
   if(!row.close_price)              row.close_price=eodClose.toFixed(2);
@@ -394,7 +394,7 @@ async function calculateMetricsForRow(row){
   }
 
   if(!row.volume&&cachedMinVolume.length){
-    const totalVol=cachedMinVolume.reduce((s,v)=>s+v.value,0);
+    const totalVol=relevant.reduce((s, c, i)=>s + cachedMinVolume[i].value,0);
     row.volume=Math.round(totalVol).toLocaleString();
   }
 
