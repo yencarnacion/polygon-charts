@@ -1,3 +1,4 @@
+./index.html
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -22,20 +23,20 @@
     }
 
     /* ─── Grid / Sheet Styling ─────────────────────────────── */
-    #sheet { margin-top:1rem; max-width:100%; overflow-x:hidden; }
+    #sheet, #news-sheet, #filings-sheet { margin-top:1rem; max-width:100%; overflow-x:hidden; }
 
     /* Header container */
-    #sheet .tabulator-header {
+    #sheet .tabulator-header, #news-sheet .tabulator-header, #filings-sheet .tabulator-header {
       background:#000000;                /* solid black header bar */
     }
 
     /* Individual header cells */
-    #sheet .tabulator-col {
+    #sheet .tabulator-col, #news-sheet .tabulator-col, #filings-sheet .tabulator-col {
       background:#000000;                /* ensure every header cell is black */
     }
 
     /* Header title text */
-    #sheet .tabulator-col-title {
+    #sheet .tabulator-col-title, #news-sheet .tabulator-col-title, #filings-sheet .tabulator-col-title {
       color:#ffffff!important;           /* bold white text */
       font-weight:bold;
       overflow:hidden;                   /* keep a single‑line ellipsis */
@@ -44,19 +45,19 @@
       user-select:text;
     }
 
-    #sheet .tabulator-tableholder{
+    #sheet .tabulator-tableholder, #news-sheet .tabulator-tableholder, #filings-sheet .tabulator-tableholder{
       background:#1e1e1e;
       color:#e0e0e0;
     }
 
-    #sheet .tabulator-cell{
+    #sheet .tabulator-cell, #news-sheet .tabulator-cell, #filings-sheet .tabulator-cell{
       background:#2a2a2a;
       color:#e0e0e0;
       user-select:text;
     }
 
-    #sheet .tabulator-row-even{background-color:#252525;}
-    #sheet .tabulator-row-odd {background-color:#2a2a2a;}
+    #sheet .tabulator-row-even, #news-sheet .tabulator-row-even, #filings-sheet .tabulator-row-even {background-color:#252525;}
+    #sheet .tabulator-row-odd, #news-sheet .tabulator-row-odd, #filings-sheet .tabulator-row-odd {background-color:#2a2a2a;}
 
     /* --- Tabulator header tooltip (hover popup) --- */
     .tabulator-tooltip{
@@ -90,6 +91,57 @@
       padding: 5px 10px;
       border-radius: 5px;
       z-index: 1000; /* Ensure it's on top */
+    }
+
+    .tabulator-cell a {
+      display: -webkit-box;
+      -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: normal;
+      word-break: break-word;
+    }
+
+    .profile-container {
+      background: #1e1e1e;
+      border: 1px solid #444;
+      padding: 1rem;
+      border-radius: 8px;
+      margin-top: 2rem;
+    }
+
+    .profile-container h4 {
+      color: #ffffff;
+      margin-bottom: 1rem;
+    }
+
+    .profile-container h5 {
+      color: #ffffff;
+      margin-bottom: 1rem;
+    }
+
+    .profile-container p {
+      margin-bottom: 0.5rem;
+    }
+
+    .profile-container p strong {
+      color: #cccccc;
+    }
+
+    .profile-container a {
+      color: #4da6ff;
+      text-decoration: underline;
+    }
+
+    .profile-container a:hover {
+      color: #80bfff;
+    }
+
+    .profile-container img {
+      max-width: 100px;
+      margin-bottom: 1rem;
+      border-radius: 4px;
     }
 
   </style>
@@ -128,6 +180,20 @@
 
 <!-- Editable grid below -->
 <div id="sheet"></div>
+
+<div class="d-flex justify-content-between align-items-center mb-2">
+  <h4 class="mb-0">News Headlines for the Day</h4>
+  <button id="copy-news" class="btn btn-secondary btn-sm">Copy News JSON</button>
+</div>
+<div id="news-sheet"></div>
+
+<div class="d-flex justify-content-between align-items-center mb-2">
+  <h4 class="mb-0">SEC Filings for the Day</h4>
+  <button id="copy-filings" class="btn btn-secondary btn-sm">Copy Filings JSON</button>
+</div>
+<div id="filings-sheet"></div>
+
+<div id="profile-container"></div>
 
 <!-- Libraries -->
 <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
@@ -195,6 +261,7 @@ async function load(e){
     chart.timeScale().fitContent();
 
     await fetchPriorDayClose(ticker,date);
+    await displayExtra(ticker, date);
   }catch(err){
     console.error('[load] error',err);
     alert('Error: '+(err.response?.data||err));
@@ -257,7 +324,8 @@ function updateTableView(){
 function truncatedTooltip(cell){
   // If cell element exists, and the content is overflowed (truncated), show full value as tooltip
   const el = cell.getElement();
-  if (el && el.scrollWidth > el.clientWidth) {
+  const textEl = el.querySelector('a') || el;
+  if (textEl && (textEl.scrollWidth > textEl.clientWidth || textEl.scrollHeight > textEl.clientHeight)) {
     return cell.getValue();
   }
   return false; // No tooltip unless overflow
@@ -527,6 +595,117 @@ document.getElementById('downloadCsv').onclick=()=>{
   a.download="signals_edited.csv";
   a.click();
 };
+
+async function displayExtra(ticker, date) {
+  try {
+    const {data} = await axios.get('/api/extra', {params: {ticker, date, days: 2}});
+
+    const newsItems = data.news || [];
+    new Tabulator("#news-sheet", {
+      data: newsItems,
+      layout: "fitColumns",
+      headerWordWrap: true,
+      tooltipsHeader: true,
+      tooltips: truncatedTooltip,
+      columns: [
+        {title: "PUBLISHED", field: "published", minWidth: 150, headerSort: false, headerTooltip: true, vertAlign:"top", formatter: function(cell){
+          return new Date(cell.getValue()).toLocaleString();
+        }},
+        {title: "TITLE", field: "title", minWidth: 400, headerSort: false, headerTooltip: true, vertAlign:"top", formatter: "link", formatterParams: {
+          urlField: "url",
+          target: "_blank",
+          labelField: "title"
+        }},
+        {title: "SOURCE", field: "source", minWidth: 150, headerSort: false, headerTooltip: true, vertAlign:"top"},
+      ],
+    });
+
+    document.getElementById('copy-news').addEventListener('click', () => {
+      const jsonData = {
+        ticker: ticker,
+        news: newsItems.map(item => ({
+          published: item.published,
+          title: item.title,
+          source: item.source,
+          url: item.url
+        }))
+      };
+      navigator.clipboard.writeText(JSON.stringify(jsonData, null, 2)).then(() => {
+        alert('News JSON copied to clipboard!');
+      }).catch(err => {
+        console.error('Failed to copy: ', err);
+        alert('Failed to copy to clipboard.');
+      });
+    });
+
+    const filingsItems = data.filings || [];
+    new Tabulator("#filings-sheet", {
+      data: filingsItems,
+      layout: "fitColumns",
+      headerWordWrap: true,
+      tooltipsHeader: true,
+      tooltips: truncatedTooltip,
+      columns: [
+        {title: "FILED AT", field: "filedAt", minWidth: 150, headerSort: false, headerTooltip: true, vertAlign:"top", formatter: function(cell){
+          return new Date(cell.getValue()).toLocaleString();
+        }},
+        {title: "FORM TYPE", field: "formType", minWidth: 100, headerSort: false, headerTooltip: true, vertAlign:"top"},
+        {title: "DESCRIPTION", field: "description", minWidth: 400, headerSort: false, headerTooltip: true, vertAlign:"top", formatter: "link", formatterParams: {
+          urlField: "linkToFilingDetails",
+          target: "_blank",
+          labelField: "description"
+        }},
+        {title: "COMPANY", field: "companyName", minWidth: 200, headerSort: false, headerTooltip: true, vertAlign:"top"},
+      ],
+    });
+
+    document.getElementById('copy-filings').addEventListener('click', () => {
+      const jsonData = {
+        ticker: ticker,
+        filings: filingsItems.map(item => ({
+          filedAt: item.filedAt,
+          formType: item.formType,
+          description: item.description,
+          companyName: item.companyName,
+          url: item.linkToFilingDetails
+        }))
+      };
+      navigator.clipboard.writeText(JSON.stringify(jsonData, null, 2)).then(() => {
+        alert('SEC Filings JSON copied to clipboard!');
+      }).catch(err => {
+        console.error('Failed to copy: ', err);
+        alert('Failed to copy to clipboard.');
+      });
+    });
+
+    const profile = data.profile || [];
+    const profileContainer = document.getElementById('profile-container');
+    profileContainer.innerHTML = '';
+    if (profile.length > 0) {
+      const prof = profile[0];
+      profileContainer.innerHTML = `
+        <h4>Company Profile (Easy Digest for Day Traders)</h4>
+        <img src="${prof.image || ''}" alt="${prof.companyName || 'Company Logo'}">
+        <h5>${prof.companyName || 'N/A'}</h5>
+        <p><strong>Exchange:</strong> ${prof.exchange || 'N/A'}</p>
+        <p><strong>Industry:</strong> ${prof.industry || 'N/A'}</p>
+        <p><strong>Sector:</strong> ${prof.sector || 'N/A'}</p>
+        <p><strong>Country/State:</strong> ${prof.country || 'N/A'} / ${prof.state || 'N/A'}</p>
+        <p><strong>Full-time Employees:</strong> ${prof.fullTimeEmployees ? Number(prof.fullTimeEmployees).toLocaleString() : 'N/A'}</p>
+        <p><strong>Beta:</strong> ${prof.beta ? Number(prof.beta).toFixed(2) : 'N/A'}</p>
+        <p><strong>Last Dividend:</strong> ${prof.lastDividend ? Number(prof.lastDividend).toFixed(2) : 'N/A'}</p>
+        <p><strong>52W Range:</strong> ${prof.range || 'N/A'}</p>
+        <p><strong>Website:</strong> <a href="${prof.website || '#'}" target="_blank" rel="noopener noreferrer">${prof.website || 'N/A'}</a></p>
+        <p><strong>Description:</strong> ${prof.description || 'N/A'}</p>
+        <p><strong>IPO Date:</strong> ${prof.ipoDate || 'N/A'}</p>
+        <p><strong>Is ETF:</strong> ${prof.isEtf ? 'Yes' : 'No'}</p>
+      `;
+    }
+  } catch (err) {
+    console.error('[displayExtra] error', err);
+  }
+}
+
 </script>
 </body>
 </html>

@@ -370,6 +370,271 @@ func shareFloatHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(floats)
 }
 
+func extraHandler(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	ticker := strings.ToUpper(q.Get("ticker"))
+	dateStr := q.Get("date")
+	days, _ := strconv.Atoi(q.Get("days"))
+	if days == 0 {
+		days = 1
+	}
+	if ticker == "" || dateStr == "" {
+		http.Error(w, "ticker and date required", 400)
+		return
+	}
+
+	var allNewsItems []NewsItem
+	var allFilings []map[string]interface{}
+	var profile []map[string]interface{}
+
+	// Fetch for current day
+	pNews, _ := queryPolygonNews(ticker, dateStr)
+	for _, p := range pNews {
+		val, exists := p["title"]
+		if !exists || val == nil {
+			continue
+		}
+		title, ok := val.(string)
+		if !ok {
+			continue
+		}
+
+		val, exists = p["url"]
+		if !exists || val == nil {
+			continue
+		}
+		url, ok := val.(string)
+		if !ok {
+			continue
+		}
+
+		val, exists = p["published_utc"]
+		if !exists || val == nil {
+			continue
+		}
+		pub, ok := val.(string)
+		if !ok {
+			continue
+		}
+
+		source := ""
+		if publisher, ok := p["publisher"].(map[string]interface{}); ok {
+			if name, ok := publisher["name"].(string); ok {
+				source = name
+			}
+		}
+
+		allNewsItems = append(allNewsItems, NewsItem{
+			Title:     title,
+			Source:    source,
+			URL:       url,
+			Published: pub,
+		})
+	}
+
+	fNews, _ := queryFMPNews(ticker, dateStr)
+	for _, f := range fNews {
+		val, exists := f["title"]
+		if !exists || val == nil {
+			continue
+		}
+		title, ok := val.(string)
+		if !ok {
+			continue
+		}
+
+		val, exists = f["site"]
+		if !exists || val == nil {
+			continue
+		}
+		site, ok := val.(string)
+		if !ok {
+			continue
+		}
+
+		val, exists = f["url"]
+		if !exists || val == nil {
+			continue
+		}
+		url, ok := val.(string)
+		if !ok {
+			continue
+		}
+
+		val, exists = f["publishedDate"]
+		if !exists || val == nil {
+			continue
+		}
+		pub, ok := val.(string)
+		if !ok {
+			continue
+		}
+
+		allNewsItems = append(allNewsItems, NewsItem{
+			Title:     title,
+			Source:    site,
+			URL:       url,
+			Published: pub,
+		})
+	}
+
+	filings, _ := querySECFilings(ticker, dateStr)
+	allFilings = append(allFilings, filings...)
+
+	profile, _ = queryFMPProfile(ticker)
+
+	// Fetch for prior day if days=2
+	if days == 2 {
+		priorStr, err := getPriorTradingDate(ticker, dateStr)
+		if err == nil {
+			pNews, _ = queryPolygonNews(ticker, priorStr)
+			for _, p := range pNews {
+				val, exists := p["title"]
+				if !exists || val == nil {
+					continue
+				}
+				title, ok := val.(string)
+				if !ok {
+					continue
+				}
+
+				val, exists = p["url"]
+				if !exists || val == nil {
+					continue
+				}
+				url, ok := val.(string)
+				if !ok {
+					continue
+				}
+
+				val, exists = p["published_utc"]
+				if !exists || val == nil {
+					continue
+				}
+				pub, ok := val.(string)
+				if !ok {
+					continue
+				}
+
+				source := ""
+				if publisher, ok := p["publisher"].(map[string]interface{}); ok {
+					if name, ok := publisher["name"].(string); ok {
+						source = name
+					}
+				}
+
+				allNewsItems = append(allNewsItems, NewsItem{
+					Title:     title,
+					Source:    source,
+					URL:       url,
+					Published: pub,
+				})
+			}
+
+			fNews, _ = queryFMPNews(ticker, priorStr)
+			for _, f := range fNews {
+				val, exists := f["title"]
+				if !exists || val == nil {
+					continue
+				}
+				title, ok := val.(string)
+				if !ok {
+					continue
+				}
+
+				val, exists = f["site"]
+				if !exists || val == nil {
+					continue
+				}
+				site, ok := val.(string)
+				if !ok {
+					continue
+				}
+
+				val, exists = f["url"]
+				if !exists || val == nil {
+					continue
+				}
+				url, ok := val.(string)
+				if !ok {
+					continue
+				}
+
+				val, exists = f["publishedDate"]
+				if !exists || val == nil {
+					continue
+				}
+				pub, ok := val.(string)
+				if !ok {
+					continue
+				}
+
+				allNewsItems = append(allNewsItems, NewsItem{
+					Title:     title,
+					Source:    site,
+					URL:       url,
+					Published: pub,
+				})
+			}
+
+			filings, _ = querySECFilings(ticker, priorStr)
+			allFilings = append(allFilings, filings...)
+		} else {
+			log.Println("Could not find prior trading date:", err)
+		}
+	}
+
+	// Deduplicate news by URL
+	uniqueMap := make(map[string]NewsItem)
+	for _, n := range allNewsItems {
+		uniqueMap[n.URL] = n
+	}
+	uniqueNews := []NewsItem{}
+	for _, n := range uniqueMap {
+		uniqueNews = append(uniqueNews, n)
+	}
+	sort.Slice(uniqueNews, func(i, j int) bool {
+		ti := parsePublished(uniqueNews[i].Published)
+		tj := parsePublished(uniqueNews[j].Published)
+		return ti.After(tj)
+	})
+
+	// Sort filings by filedAt desc
+	sort.Slice(allFilings, func(i, j int) bool {
+		ti := parsePublished(allFilings[i]["filedAt"].(string))
+		tj := parsePublished(allFilings[j]["filedAt"].(string))
+		return ti.After(tj)
+	})
+
+	out := map[string]interface{}{
+		"news":    uniqueNews,
+		"filings": allFilings,
+		"profile": profile,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(out)
+}
+
+func getPriorTradingDate(ticker, dateStr string) (string, error) {
+	date, err := time.Parse("2006-01-02", dateStr)
+	if err != nil {
+		return "", err
+	}
+	for i := 1; i <= 10; i++ {
+		prior := date.AddDate(0, 0, -i)
+		for prior.Weekday() == time.Saturday || prior.Weekday() == time.Sunday {
+			prior = prior.AddDate(0, 0, -1)
+		}
+		priorStr := prior.Format("2006-01-02")
+		bars, err := queryPolygon(ticker, 1, "minute", priorStr, priorStr)
+		if err == nil && len(bars) > 0 {
+			return priorStr, nil
+		}
+	}
+	return "", fmt.Errorf("no prior trading day found")
+}
+
 func chartHandler(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	date := q.Get("date")
@@ -550,76 +815,107 @@ func chartDataHandler(w http.ResponseWriter, r *http.Request) {
 	
 	metrics := calculateMetrics(extendedCandles, extendedVolume, priorClose, priorVolume)
 	
+	var allNewsItems []NewsItem
+	var allFilings []map[string]interface{}
+
+	// Fetch current day
 	pNews, _ := queryPolygonNews(symbol, dateStr)
-	fNews, _ := queryFMPNews(symbol, dateStr)
-	allNews := []NewsItem{}
 	for _, p := range pNews {
 		val, exists := p["title"]
-		if !exists || val == nil {
-			continue
-		}
+		if !exists || val == nil { continue }
 		title, ok := val.(string)
 		if !ok { continue }
-
 		val, exists = p["url"]
-		if !exists || val == nil {
-			continue
-		}
+		if !exists || val == nil { continue }
 		url, ok := val.(string)
 		if !ok { continue }
-
 		val, exists = p["published_utc"]
-		if !exists || val == nil {
-			continue
-		}
+		if !exists || val == nil { continue }
 		pub, ok := val.(string)
 		if !ok { continue }
-
-		allNews = append(allNews, NewsItem{
-			Title:     title,
-			Source:    "Polygon",
-			URL:       url,
-			Published: pub,
-		})
+		source := ""
+		if publisher, ok := p["publisher"].(map[string]interface{}); ok {
+			if name, ok := publisher["name"].(string); ok {
+				source = name
+			}
+		}
+		allNewsItems = append(allNewsItems, NewsItem{Title: title, Source: source, URL: url, Published: pub})
 	}
+	fNews, _ := queryFMPNews(symbol, dateStr)
 	for _, f := range fNews {
 		val, exists := f["title"]
-		if !exists || val == nil {
-			continue
-		}
+		if !exists || val == nil { continue }
 		title, ok := val.(string)
 		if !ok { continue }
-
 		val, exists = f["site"]
-		if !exists || val == nil {
-			continue
-		}
+		if !exists || val == nil { continue }
 		site, ok := val.(string)
 		if !ok { continue }
-
 		val, exists = f["url"]
-		if !exists || val == nil {
-			continue
-		}
+		if !exists || val == nil { continue }
 		url, ok := val.(string)
 		if !ok { continue }
-
 		val, exists = f["publishedDate"]
-		if !exists || val == nil {
-			continue
-		}
+		if !exists || val == nil { continue }
 		pub, ok := val.(string)
 		if !ok { continue }
-
-		allNews = append(allNews, NewsItem{
-			Title:     title,
-			Source:    site,
-			URL:       url,
-			Published: pub,
-		})
+		allNewsItems = append(allNewsItems, NewsItem{Title: title, Source: site, URL: url, Published: pub})
 	}
+	filings, _ := querySECFilings(symbol, dateStr)
+	allFilings = append(allFilings, filings...)
+
+	// Fetch prior day
+	priorStr, err := getPriorTradingDate(symbol, dateStr)
+	if err == nil {
+		pNewsPrior, _ := queryPolygonNews(symbol, priorStr)
+		for _, p := range pNewsPrior {
+			val, exists := p["title"]
+			if !exists || val == nil { continue }
+			title, ok := val.(string)
+			if !ok { continue }
+			val, exists = p["url"]
+			if !exists || val == nil { continue }
+			url, ok := val.(string)
+			if !ok { continue }
+			val, exists = p["published_utc"]
+			if !exists || val == nil { continue }
+			pub, ok := val.(string)
+			if !ok { continue }
+			source := ""
+			if publisher, ok := p["publisher"].(map[string]interface{}); ok {
+				if name, ok := publisher["name"].(string); ok {
+					source = name
+				}
+			}
+			allNewsItems = append(allNewsItems, NewsItem{Title: title, Source: source, URL: url, Published: pub})
+		}
+		fNewsPrior, _ := queryFMPNews(symbol, priorStr)
+		for _, f := range fNewsPrior {
+			val, exists := f["title"]
+			if !exists || val == nil { continue }
+			title, ok := val.(string)
+			if !ok { continue }
+			val, exists = f["site"]
+			if !exists || val == nil { continue }
+			site, ok := val.(string)
+			if !ok { continue }
+			val, exists = f["url"]
+			if !exists || val == nil { continue }
+			url, ok := val.(string)
+			if !ok { continue }
+			val, exists = f["publishedDate"]
+			if !exists || val == nil { continue }
+			pub, ok := val.(string)
+			if !ok { continue }
+			allNewsItems = append(allNewsItems, NewsItem{Title: title, Source: site, URL: url, Published: pub})
+		}
+		filingsPrior, _ := querySECFilings(symbol, priorStr)
+		allFilings = append(allFilings, filingsPrior...)
+	}
+
+	// Deduplicate and sort news
 	uniqueMap := make(map[string]NewsItem)
-	for _, n := range allNews {
+	for _, n := range allNewsItems {
 		uniqueMap[n.URL] = n
 	}
 	uniqueNews := []NewsItem{}
@@ -632,7 +928,12 @@ func chartDataHandler(w http.ResponseWriter, r *http.Request) {
 		return ti.After(tj)
 	})
 
-	filings, _ := querySECFilings(symbol, dateStr)
+	// Sort filings
+	sort.Slice(allFilings, func(i, j int) bool {
+		ti := parsePublished(allFilings[i]["filedAt"].(string))
+		tj := parsePublished(allFilings[j]["filedAt"].(string))
+		return ti.After(tj)
+	})
 
 	profile, _ := queryFMPProfile(symbol)
 	var profileData map[string]interface{}
@@ -649,7 +950,7 @@ func chartDataHandler(w http.ResponseWriter, r *http.Request) {
 		"sma":        sma,
 		"metrics":    metrics,
 		"news":       uniqueNews,
-		"filings":    filings,
+		"filings":    allFilings,
 		"profile":    profileData,
 	}
 	
@@ -765,6 +1066,7 @@ func main() {
 	http.HandleFunc("/api/candles", candlesHandler)
 	http.HandleFunc("/api/ticker-details", tickerDetailsHandler)
 	http.HandleFunc("/api/share-float", shareFloatHandler)
+	http.HandleFunc("/api/extra", extraHandler)
 	http.HandleFunc("/chart", chartHandler)
 	http.HandleFunc("/api/chart-data", chartDataHandler)
 
