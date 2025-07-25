@@ -19,8 +19,6 @@ import (
 	"github.com/joho/godotenv"
 )
 
-/*────────────────────  configuration  ────────────────────*/
-
 var (
 	apiKeyFlag = flag.String("apikey", "", "Polygon.io API key (overrides .env)")
 	portFlag   = flag.Int("port", 0,  "HTTP port (overrides .env)")
@@ -28,12 +26,10 @@ var (
 
 var (
 	polygonAPIKey string
-	fmpAPIKey     string // New for FMP
-	secAPIKey     string // New for SEC
+	fmpAPIKey     string
+	secAPIKey     string
 	listenPort    int
 )
-
-/*────────────────────  embedded HTML  ────────────────────*/
 
 //go:embed index.html
 var indexHTML string
@@ -41,15 +37,13 @@ var indexHTML string
 //go:embed chart.html
 var chartHTML string
 
-/*────────────────────  data structures  ──────────────────*/
-
 type polygonBar struct {
-	T int64   `json:"t"` // unix-ms
+	T int64   `json:"t"`
 	O float64 `json:"o"`
 	H float64 `json:"h"`
 	L float64 `json:"l"`
 	C float64 `json:"c"`
-	V float64 `json:"v"` // volume
+	V float64 `json:"v"`
 }
 type polygonResp struct{ Results []polygonBar `json:"results"` }
 
@@ -66,7 +60,7 @@ type linePoint struct {
 }
 type payload struct {
 	Candles []candlePoint `json:"candles"`
-	Volume  []linePoint   `json:"volume"` // NEW
+	Volume  []linePoint   `json:"volume"`
 	MinCandles []candlePoint `json:"minCandles"`
 	MinVolume  []linePoint   `json:"minVolume"`
 	VWAP    []linePoint   `json:"vwap"`
@@ -90,8 +84,6 @@ type NewsItem struct {
 	URL       string `json:"url"`
 	Published string `json:"published"`
 }
-
-/*────────────────────  helpers  ─────────────────────────*/
 
 func queryPolygon(sym string, mult int, span, from, to string) ([]polygonBar, error) {
 	url := fmt.Sprintf(
@@ -146,9 +138,26 @@ func queryFMPFloat(ticker string) ([]FMPFloat, error) {
 	return floats, nil
 }
 
+func queryFMPProfile(symbol string) ([]map[string]interface{}, error) {
+	url := fmt.Sprintf("https://financialmodelingprep.com/api/v3/profile/%s?apikey=%s", symbol, fmpAPIKey)
+	resp, err := http.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("FMP Profile: %s", resp.Status)
+	}
+	var profile []map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&profile); err != nil {
+		return nil, err
+	}
+	return profile, nil
+}
+
 func queryPolygonNews(ticker, dateStr string) ([]map[string]interface{}, error) {
 	nextD := nextDay(dateStr)
-	url := fmt.Sprintf("https://api.polygon.io/benzinga/v1/news?tickers=%s&published.gte=%s&published.lt=%s&limit=50&sort=published.desc&apiKey=%s",
+	url := fmt.Sprintf("https://api.polygon.io/v2/reference/news?ticker=%s&published_utc.gte=%s&published_utc.lt=%s&limit=50&sort=published_utc.desc&apiKey=%s",
 		ticker, dateStr, nextD, polygonAPIKey)
 	resp, err := http.Get(url)
 	if err != nil {
@@ -248,19 +257,16 @@ func openBrowser(u string) {
 	}
 }
 
-/*────────────────────  HTTP handlers  ───────────────────*/
-
 func rootHandler(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/html")
 	fmt.Fprint(w, indexHTML)
 }
 
 func candlesHandler(w http.ResponseWriter, r *http.Request) {
-	/* ---------- query params ---------- */
 	q       := r.URL.Query()
 	symbol  := strings.ToUpper(q.Get("ticker"))
 	tf      := strings.ToLower(strings.TrimSpace(q.Get("timeframe")))
-	dateStr := q.Get("date") // YYYY-MM-DD
+	dateStr := q.Get("date")
 	extended := q.Get("extended") == "true"
 
 	if symbol == "" || tf == "" || dateStr == "" {
@@ -268,7 +274,6 @@ func candlesHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	/* timeframe → multiplier / span */
 	var mult int; var span string
 	switch tf {
 	case "1m","1min":   mult,span = 1, "minute"
@@ -283,7 +288,6 @@ func candlesHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unsupported timeframe", 400); return
 	}
 
-	/* ---------- pull chosen-tf bars ---------- */
 	bars, err := queryPolygon(symbol, mult, span, dateStr, dateStr)
 	if err != nil { http.Error(w, err.Error(), 502); return }
 
@@ -294,14 +298,13 @@ func candlesHandler(w http.ResponseWriter, r *http.Request) {
 	for _, b := range bars {
 		ts := time.UnixMilli(b.T).In(loc)
 		h,m := ts.Hour(), ts.Minute()
-		if !extended && (h < 9 || (h==9 && m<30) || h >= 16) { continue } // RTH filter if not extended
+		if !extended && (h < 9 || (h==9 && m<30) || h >= 16) { continue }
 
 		candles = append(candles, candlePoint{
 			Time:b.T/1000, Open:b.O, High:b.H, Low:b.L, Close:b.C})
 		vol = append(vol, linePoint{Time:b.T/1000, Value:b.V})
 	}
 
-	/* ---------- SMA-9 ---------- */
 	var sum float64
 	sma := make([]linePoint,0,len(candles))
 	for i,c := range candles{
@@ -310,7 +313,6 @@ func candlesHandler(w http.ResponseWriter, r *http.Request) {
 		if i>=8 { sma = append(sma,linePoint{Time:c.Time,Value:sum/9}) }
 	}
 
-	/* ---------- VWAP, MinCandles, MinVolume (1-min bars) ---------- */
 	minBars, err := queryPolygon(symbol,1,"minute",dateStr,dateStr)
 	if err != nil { http.Error(w, err.Error(), 502); return }
 
@@ -511,6 +513,10 @@ func chartDataHandler(w http.ResponseWriter, r *http.Request) {
 			for j := i; j < end && j < len(extendedVolume); j++ {
 				v += extendedVolume[j].Value
 			}
+			for _, g := range group {
+				if g.High > h { h = g.High }
+				if g.Low < l { l = g.Low }
+			}
 			candles = append(candles, candlePoint{
 				Time: group[0].Time, Open: o, High: h, Low: l, Close: c,
 			})
@@ -544,7 +550,6 @@ func chartDataHandler(w http.ResponseWriter, r *http.Request) {
 	
 	metrics := calculateMetrics(extendedCandles, extendedVolume, priorClose, priorVolume)
 	
-	// Fetch news
 	pNews, _ := queryPolygonNews(symbol, dateStr)
 	fNews, _ := queryFMPNews(symbol, dateStr)
 	allNews := []NewsItem{}
@@ -563,7 +568,7 @@ func chartDataHandler(w http.ResponseWriter, r *http.Request) {
 		url, ok := val.(string)
 		if !ok { continue }
 
-		val, exists = p["published"]
+		val, exists = p["published_utc"]
 		if !exists || val == nil {
 			continue
 		}
@@ -572,7 +577,7 @@ func chartDataHandler(w http.ResponseWriter, r *http.Request) {
 
 		allNews = append(allNews, NewsItem{
 			Title:     title,
-			Source:    "Benzinga",
+			Source:    "Polygon",
 			URL:       url,
 			Published: pub,
 		})
@@ -627,8 +632,13 @@ func chartDataHandler(w http.ResponseWriter, r *http.Request) {
 		return ti.After(tj)
 	})
 
-	// Fetch SEC filings
 	filings, _ := querySECFilings(symbol, dateStr)
+
+	profile, _ := queryFMPProfile(symbol)
+	var profileData map[string]interface{}
+	if len(profile) > 0 {
+		profileData = profile[0]
+	}
 	
 	out := map[string]interface{}{
 		"candles":    candles,
@@ -640,6 +650,7 @@ func chartDataHandler(w http.ResponseWriter, r *http.Request) {
 		"metrics":    metrics,
 		"news":       uniqueNews,
 		"filings":    filings,
+		"profile":    profileData,
 	}
 	
 	w.Header().Set("Content-Type", "application/json")
@@ -732,8 +743,6 @@ func calculateMetrics(candles []candlePoint, volumes []linePoint, priorClose, pr
 	return metrics
 }
 
-/*────────────────────  main  ───────────────────────────*/
-
 func main() {
 	_ = godotenv.Load()
 	flag.Parse()
@@ -754,10 +763,10 @@ func main() {
 
 	http.HandleFunc("/", rootHandler)
 	http.HandleFunc("/api/candles", candlesHandler)
-	http.HandleFunc("/api/ticker-details", tickerDetailsHandler) // New
-	http.HandleFunc("/api/share-float", shareFloatHandler)       // New
-	http.HandleFunc("/chart", chartHandler)                      // New chart endpoint
-	http.HandleFunc("/api/chart-data", chartDataHandler)         // New chart data endpoint
+	http.HandleFunc("/api/ticker-details", tickerDetailsHandler)
+	http.HandleFunc("/api/share-float", shareFloatHandler)
+	http.HandleFunc("/chart", chartHandler)
+	http.HandleFunc("/api/chart-data", chartDataHandler)
 
 	addr := fmt.Sprintf(":%d", listenPort)
 	go func(){ time.Sleep(500*time.Millisecond); openBrowser("http://localhost"+addr) }()
