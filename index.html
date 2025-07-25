@@ -1,4 +1,3 @@
-./index.html
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -203,6 +202,10 @@
 <script src="https://cdn.jsdelivr.net/npm/tabulator-tables@5.4.4/dist/js/tabulator.min.js"></script>
 
 <script>
+let currentNews = [];
+let currentFilings = [];
+let listenersAdded = false;
+
 /* ─── Date picker with current NY date default ───────────── */
 const nyFormatter = new Intl.DateTimeFormat('en-CA',{
   timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit'});
@@ -601,6 +604,7 @@ async function displayExtra(ticker, date) {
     const {data} = await axios.get('/api/extra', {params: {ticker, date, days: 2}});
 
     const newsItems = data.news || [];
+    currentNews = newsItems;
     new Tabulator("#news-sheet", {
       data: newsItems,
       layout: "fitColumns",
@@ -620,25 +624,8 @@ async function displayExtra(ticker, date) {
       ],
     });
 
-    document.getElementById('copy-news').addEventListener('click', () => {
-      const jsonData = {
-        ticker: ticker,
-        news: newsItems.map(item => ({
-          published: item.published,
-          title: item.title,
-          source: item.source,
-          url: item.url
-        }))
-      };
-      navigator.clipboard.writeText(JSON.stringify(jsonData, null, 2)).then(() => {
-        alert('News JSON copied to clipboard!');
-      }).catch(err => {
-        console.error('Failed to copy: ', err);
-        alert('Failed to copy to clipboard.');
-      });
-    });
-
     const filingsItems = data.filings || [];
+    currentFilings = filingsItems;
     new Tabulator("#filings-sheet", {
       data: filingsItems,
       layout: "fitColumns",
@@ -657,25 +644,6 @@ async function displayExtra(ticker, date) {
         }},
         {title: "COMPANY", field: "companyName", minWidth: 200, headerSort: false, headerTooltip: true, vertAlign:"top"},
       ],
-    });
-
-    document.getElementById('copy-filings').addEventListener('click', () => {
-      const jsonData = {
-        ticker: ticker,
-        filings: filingsItems.map(item => ({
-          filedAt: item.filedAt,
-          formType: item.formType,
-          description: item.description,
-          companyName: item.companyName,
-          url: item.linkToFilingDetails
-        }))
-      };
-      navigator.clipboard.writeText(JSON.stringify(jsonData, null, 2)).then(() => {
-        alert('SEC Filings JSON copied to clipboard!');
-      }).catch(err => {
-        console.error('Failed to copy: ', err);
-        alert('Failed to copy to clipboard.');
-      });
     });
 
     const profile = data.profile || [];
@@ -706,6 +674,53 @@ async function displayExtra(ticker, date) {
   }
 }
 
+if (!listenersAdded) {
+  document.getElementById('copy-news').addEventListener('click', () => {
+    if (currentNews.length === 0) {
+      alert('No news data available.');
+      return;
+    }
+    const jsonData = {
+      ticker: document.getElementById('ticker').value,
+      news: currentNews.map(item => ({
+        published: item.published,
+        title: item.title,
+        source: item.source,
+        url: item.url
+      }))
+    };
+    navigator.clipboard.writeText(JSON.stringify(jsonData, null, 2)).then(() => {
+      alert('News JSON copied to clipboard!');
+    }).catch(err => {
+      console.error('Failed to copy: ', err);
+      alert('Failed to copy to clipboard.');
+    });
+  });
+
+  document.getElementById('copy-filings').addEventListener('click', () => {
+    if (currentFilings.length === 0) {
+      alert('No filings data available.');
+      return;
+    }
+    const jsonData = {
+      ticker: document.getElementById('ticker').value,
+      filings: currentFilings.map(item => ({
+        filedAt: item.filedAt,
+        formType: item.formType,
+        description: item.description,
+        companyName: item.companyName,
+        url: item.linkToFilingDetails
+      }))
+    };
+    navigator.clipboard.writeText(JSON.stringify(jsonData, null, 2)).then(() => {
+      alert('SEC Filings JSON copied to clipboard!');
+    }).catch(err => {
+      console.error('Failed to copy: ', err);
+      alert('Failed to copy to clipboard.');
+    });
+  });
+  listenersAdded = true;
+}
+
 </script>
-</body>
 </html>

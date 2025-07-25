@@ -157,6 +157,8 @@
 <script src="https://cdn.jsdelivr.net/npm/tabulator-tables@5.4.4/dist/js/tabulator.min.js"></script>
 
 <script>
+let listenersAdded = false;
+
 const chart = LightweightCharts.createChart(document.getElementById('chart'),{
   layout:{background:{color:'#1e1e1e'},textColor:'#cccccc'},
   grid:{vertLines:{color:'#2e2e2e'},horzLines:{color:'#2e2e2e'}},
@@ -355,24 +357,6 @@ async function loadChart(){
       ],
     });
 
-    document.getElementById('copy-news').addEventListener('click', () => {
-      const jsonData = {
-        ticker: ticker,
-        news: newsItems.map(item => ({
-          published: item.published,
-          title: item.title,
-          source: item.source,
-          url: item.url
-        }))
-      };
-     navigator.clipboard.writeText(JSON.stringify(jsonData, null, 2)).then(() => {
-        alert('News JSON copied to clipboard!');
-      }).catch(err => {
-        console.error('Failed to copy: ', err);
-        alert('Failed to copy to clipboard.');
-      });
-    });
-
     const filingsItems = data.filings || [];
     new Tabulator("#filings-sheet", {
       data: filingsItems,
@@ -394,24 +378,45 @@ async function loadChart(){
       ],
     });
 
-    document.getElementById('copy-filings').addEventListener('click', () => {
-      const jsonData = {
-        ticker: ticker,
-        filings: filingsItems.map(item => ({
-          filedAt: item.filedAt,
-          formType: item.formType,
-          description: item.description,
-          companyName: item.companyName,
-          url: item.linkToFilingDetails
-        }))
-      };
-      navigator.clipboard.writeText(JSON.stringify(jsonData, null, 2)).then(() => {
-        alert('SEC Filings JSON copied to clipboard!');
-      }).catch(err => {
-        console.error('Failed to copy: ', err);
-        alert('Failed to copy to clipboard.');
+    if (!listenersAdded) {
+      document.getElementById('copy-news').addEventListener('click', () => {
+        const jsonData = {
+          ticker: ticker,
+          news: newsItems.map(item => ({
+            published: item.published,
+            title: item.title,
+            source: item.source,
+            url: item.url
+          }))
+        };
+        navigator.clipboard.writeText(JSON.stringify(jsonData, null, 2)).then(() => {
+          alert('News JSON copied to clipboard!');
+        }).catch(err => {
+          console.error('Failed to copy: ', err);
+          alert('Failed to copy to clipboard.');
+        });
       });
-    });
+
+      document.getElementById('copy-filings').addEventListener('click', () => {
+        const jsonData = {
+          ticker: ticker,
+          filings: filingsItems.map(item => ({
+            filedAt: item.filedAt,
+            formType: item.formType,
+            description: item.description,
+            companyName: item.companyName,
+            url: item.linkToFilingDetails
+          }))
+        };
+        navigator.clipboard.writeText(JSON.stringify(jsonData, null, 2)).then(() => {
+          alert('SEC Filings JSON copied to clipboard!');
+        }).catch(err => {
+          console.error('Failed to copy: ', err);
+          alert('Failed to copy to clipboard.');
+        });
+      });
+      listenersAdded = true;
+    }
 
     const profile = data.profile || {};
     if (Object.keys(profile).length > 0) {
@@ -449,5 +454,4 @@ function combineDateAndTime(dateStr,HHMM){
 
 loadChart();
 </script>
-</body>
 </html>
