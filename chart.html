@@ -4,14 +4,15 @@
   <meta charset="UTF-8"/>
   <title>Chart - {{TICKER}} {{DATE}} {{TIME}}</title>
 
+  <!-- Bootstrap & Tabulator CSS -->
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
-
   <link href="https://cdn.jsdelivr.net/npm/tabulator-tables@5.4.4/dist/css/tabulator.min.css" rel="stylesheet"/>
+  <link href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css" rel="stylesheet">
 
   <style>
     body { margin:1rem; background:#121212; color:#e0e0e0 }
-    #chart { height:600px; margin-bottom: 2rem; }
-    
+    #signal-chart, #base-chart { height:600px; margin-bottom: 2rem; width: 100%; }
+
     .signal-info {
       background: #1e1e1e;
       border: 1px solid #444;
@@ -19,71 +20,42 @@
       border-radius: 8px;
       margin-bottom: 1rem;
     }
-    
-    .signal-buy {
-      color: #26a69a;
-      font-weight: bold;
-    }
-    
-    .signal-sell {
-      color: #ef5350;
-      font-weight: bold;
+
+    .signal-buy { color: #26a69a; font-weight: bold; }
+    .signal-sell { color: #ef5350; font-weight: bold; }
+
+    #signal-metrics-sheet, #base-sheet, #signal-news-sheet, #signal-filings-sheet, #base-news-sheet, #base-filings-sheet {
+      margin-top:1rem; max-width:100%; overflow-x:auto;
     }
 
-    #metrics-sheet, #news-sheet, #filings-sheet { margin-top:1rem; max-width:100%; overflow-x:hidden; }
-
-    .tabulator-header {
-      background:#000000;                
-    }
-
-    .tabulator-col {
-      background:#000000;                
-    }
-
+    .tabulator-header { background:#000000; }
+    .tabulator-col { background:#000000; }
     .tabulator-col-title {
-      color:#ffffff!important;           
+      color:#ffffff !important;
       font-weight:bold;
-      overflow:hidden;                   
+      overflow:hidden;
       text-overflow:ellipsis;
       white-space:nowrap;
       user-select:text;
     }
+    .tabulator-tableholder { background:#1e1e1e; color:#e0e0e0; }
+    .tabulator-cell { background:#2a2a2a; color:#ffffff; user-select:text; }
+    .tabulator-row-even { background-color:#252525; }
+    .tabulator-row-odd { background-color:#2a2a2a; }
 
-    .tabulator-tableholder{
-      background:#1e1e1e;
-      color:#000000;
+    #signal-metrics-sheet .tabulator-header, #signal-news-sheet .tabulator-header, #signal-filings-sheet .tabulator-header,
+    #base-sheet .tabulator-header, #base-news-sheet .tabulator-header, #base-filings-sheet .tabulator-header {
+      background:#000000 !important;
+    }
+    #signal-metrics-sheet .tabulator-col, #signal-news-sheet .tabulator-col, #signal-filings-sheet .tabulator-col,
+    #base-sheet .tabulator-col, #base-news-sheet .tabulator-col, #base-filings-sheet .tabulator-col {
+      background:#000000 !important;
     }
 
-    .tabulator-cell{
-      background:#2a2a2a;
-      color:#ffffff;
-      user-select:text;
-    }
-
-    
-    .tabulator-row-even{background-color:#252525;}
-    .tabulator-row-odd {background-color:#2a2a2a;}
-
-    /* ── Black background for every header cell in the gauges below the chart ── */
-#metrics-sheet  .tabulator-header,
-/*#metrics-sheet  .tabulator-col,*/
-#news-sheet     .tabulator-header,
-/*#news-sheet     .tabulator-col,*/
-#filings-sheet  .tabulator-header,
-/*#filings-sheet  .tabulator-col*/{
-  background:#ffffff !important;   /* solid black */
-}
-
-#metrics-sheet  .tabulator-col,
-#news-sheet     .tabulator-col,
-#filings-sheet  .tabulator-col{
-  background:#000000 !important;   /* solid black */
-}
-    
-    .tabulator-tooltip{
-      background:#000 !important;   
-      color:#fff !important;        
-      font-weight:bold;             
+    .tabulator-tooltip {
+      background:#000 !important;
+      color:#fff !important;
+      font-weight:bold;
       z-index: 9999;
       max-width: 600px;
       white-space: pre-line;
@@ -107,92 +79,159 @@
       border-radius: 8px;
       margin-top: 2rem;
     }
+    .profile-container h4 { color: #ffffff; margin-bottom: 1rem; }
+    .profile-container h5 { color: #ffffff; margin-bottom: 1rem; }
+    .profile-container p { margin-bottom: 0.5rem; }
+    .profile-container p strong { color: #cccccc; }
+    .profile-container a { color: #4da6ff; text-decoration: underline; }
+    .profile-container a:hover { color: #80bfff; }
+    .profile-container img { max-width: 100px; margin-bottom: 1rem; border-radius: 4px; }
 
-    .profile-container h4 {
+    .tabulator-row:hover .tabulator-cell { background-color: #3a3a3a !important; color: #ffffff !important; }
+    .tabulator-col:hover { background-color: #111111 !important; }
+    .tabulator-row:hover { background-color: #3a3a3a !important; }
+
+    /* Base chart specific styles */
+    #base-form .form-control, #base-form .form-select {
+      background:#1e1e1e !important;
+      color:#e0e0e0 !important;
+      border:1px solid #444 !important;
+    }
+    #base-row-indicator {
+      position: absolute;
+      top: 100px;
+      right: 20px;
       color: #ffffff;
-      margin-bottom: 1rem;
+      font-weight: bold;
+      font-size: 18px;
+      background-color: rgba(0, 0, 0, 0.7);
+      padding: 5px 10px;
+      border-radius: 5px;
+      z-index: 1000;
     }
-
-    .profile-container h5 {
-      color: #ffffff;
-      margin-bottom: 1rem;
-    }
-
-    .profile-container p {
-      margin-bottom: 0.5rem;
-    }
-
-    .profile-container p strong {
-      color: #cccccc;
-    }
-
-    .profile-container a {
-      color: #4da6ff;
-      text-decoration: underline;
-    }
-
-    .profile-container a:hover {
-      color: #80bfff;
-    }
-
-    .profile-container img {
-      max-width: 100px;
-      margin-bottom: 1rem;
-      border-radius: 4px;
-    }
-
   </style>
 </head>
 <body>
-
 <div class="container-fluid">
-  <div class="signal-info">
-    <h3>{{TICKER}} - {{DATE}} at {{TIME}}</h3>
-    <p>Signal: <span class="signal-{{SIGNAL}}">{{SIGNAL}}</span> | Resolution: {{RESOLUTION}}</p>
+  <!-- Tabs Navigation -->
+  <ul class="nav nav-tabs" id="chartTabs" role="tablist">
+    <li class="nav-item" role="presentation">
+      <button class="nav-link active" id="signal-tab" data-bs-toggle="tab" data-bs-target="#signal" type="button" role="tab" aria-controls="signal" aria-selected="true">Signal Chart</button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link" id="base-tab" data-bs-toggle="tab" data-bs-target="#base" type="button" role="tab" aria-controls="base" aria-selected="false">Base Chart</button>
+    </li>
+  </ul>
+
+  <!-- Tab Content -->
+  <div class="tab-content" id="chartTabContent">
+    <!-- Signal Chart Tab -->
+    <div class="tab-pane fade show active" id="signal" role="tabpanel" aria-labelledby="signal-tab">
+      <div class="signal-info">
+        <h3>{{TICKER}} - {{DATE}} at {{TIME}}</h3>
+        <p>Signal: <span class="signal-{{SIGNAL}}">{{SIGNAL}}</span> | Resolution: {{RESOLUTION}}</p>
+      </div>
+      <div id="signal-chart" class="border rounded"></div>
+      <h4>Metrics (as of {{TIME}})</h4>
+      <div id="signal-metrics-sheet"></div>
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <h4 class="mb-0">News Headlines for the Day</h4>
+        <button id="signal-copy-news" class="btn btn-secondary btn-sm">Copy News JSON</button>
+      </div>
+      <div id="signal-news-sheet"></div>
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <h4 class="mb-0">SEC Filings for the Day</h4>
+        <button id="signal-copy-filings" class="btn btn-secondary btn-sm">Copy Filings JSON</button>
+      </div>
+      <div id="signal-filings-sheet"></div>
+      <div id="signal-profile-container" class="profile-container"></div>
+    </div>
+
+    <!-- Base Chart Tab -->
+    <div class="tab-pane fade" id="base" role="tabpanel" aria-labelledby="base-tab">
+      <h3 class="mb-3">Candles + Volume (gray), VWAP (yellow) & SMA-9 (red)</h3>
+      <form id="base-form" class="row gy-2 gx-2 align-items-center">
+        <div class="col-auto"><input id="base-ticker" class="form-control" value="{{TICKER}}" placeholder="Ticker"></div>
+        <div class="col-auto">
+          <select id="base-timeframe" class="form-select">
+            <option value="1m" {{RESOLUTION=='1m'?'selected':''}}>1 m</option>
+            <option value="2m" {{RESOLUTION=='2m'?'selected':''}}>2 m</option>
+            <option value="3m" {{RESOLUTION=='3m'?'selected':''}}>3 m</option>
+            <option value="5m" {{RESOLUTION=='5m'?'selected':''}}>5 m</option>
+            <option value="10m" {{RESOLUTION=='10m'?'selected':''}}>10 m</option>
+            <option value="15m" {{RESOLUTION=='15m'?'selected':''}}>15 m</option>
+            <option value="30m" {{RESOLUTION=='30m'?'selected':''}}>30 m</option>
+            <option value="1h" {{RESOLUTION=='1h'?'selected':''}}>1 h</option>
+          </select>
+        </div>
+        <div class="col-auto"><input id="base-date" class="form-control" value="{{DATE}}" placeholder="Date"></div>
+        <div class="col-auto"><button class="btn btn-primary" type="submit">Load</button></div>
+      </form>
+      <div class="d-flex align-items-center gap-2 flex-wrap mt-3">
+        <input id="base-csvFile" type="file" accept=".csv,text/csv" class="form-control" style="max-width:260px">
+        <input id="base-newColumn" class="form-control" placeholder="New column name" style="max-width:200px">
+        <button id="base-addColumn" class="btn btn-outline-success btn-sm">Add Column</button>
+        <button id="base-prevRow" class="btn btn-outline-light btn-sm">▲ Prev</button>
+        <button id="base-nextRow" class="btn btn-outline-light btn-sm">▼ Next</button>
+        <button id="base-toggleSignal" class="btn btn-outline-light btn-sm">Toggle Signal</button>
+        <button id="base-downloadCsv" class="btn btn-secondary btn-sm ms-auto">Export CSV</button>
+      </div>
+      <div id="base-row-indicator"></div>
+      <div id="base-chart" class="border mt-4 rounded"></div>
+      <div id="base-sheet"></div>
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <h4 class="mb-0">News Headlines for the Day</h4>
+        <button id="base-copy-news" class="btn btn-secondary btn-sm">Copy News JSON</button>
+      </div>
+      <div id="base-news-sheet"></div>
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <h4 class="mb-0">SEC Filings for the Day</h4>
+        <button id="base-copy-filings" class="btn btn-secondary btn-sm">Copy Filings JSON</button>
+      </div>
+      <div id="base-filings-sheet"></div>
+      <div id="base-profile-container" class="profile-container"></div>
+    </div>
   </div>
-
-  <div id="chart" class="border rounded"></div>
-
-  <h4>Metrics (as of {{TIME}})</h4>
-  <div id="metrics-sheet"></div>
-
-  <div class="d-flex justify-content-between align-items-center mb-2">
-    <h4 class="mb-0">News Headlines for the Day</h4>
-    <button id="copy-news" class="btn btn-secondary btn-sm">Copy News JSON</button>
-  </div>
-  <div id="news-sheet"></div>
-
-  <div class="d-flex justify-content-between align-items-center mb-2">
-    <h4 class="mb-0">SEC Filings for the Day</h4>
-    <button id="copy-filings" class="btn btn-secondary btn-sm">Copy Filings JSON</button>
-  </div>
-  <div id="filings-sheet"></div>
 </div>
 
+<!-- Libraries -->
 <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
 <script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.0.0/dist/lightweight-charts.standalone.production.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/tabulator-tables@5.4.4/dist/js/tabulator.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 
 <script>
-let listenersAdded = false;
+// Signal Chart Logic
+let signalListenersAdded = false;
+let signalChart, signalCandleSeries, signalVolumeSeries, signalVwapSeries, signalSmaSeries;
 
-const chart = LightweightCharts.createChart(document.getElementById('chart'),{
-  layout:{background:{color:'#1e1e1e'},textColor:'#cccccc'},
-  grid:{vertLines:{color:'#2e2e2e'},horzLines:{color:'#2e2e2e'}},
-  timeScale:{timeVisible:true,secondsVisible:false,
-    tickMarkFormatter:t=>new Date(t*1000).toLocaleTimeString(
-      'en-US',{timeZone:'America/New_York',hour12:false,hour:'2-digit',minute:'2-digit'})}
-});
-const candleSeries = chart.addCandlestickSeries({
-  upColor:'#26a69a',downColor:'#ef5350',
-  wickUpColor:'#26a69a',wickDownColor:'#ef5350',borderVisible:false});
-const volumeSeries = chart.addHistogramSeries({
-  color:'#888',priceFormat:{type:'volume'},
-  priceScaleId:'vol',scaleMargins:{top:0.75,bottom:0}});
-chart.priceScale('right').applyOptions({scaleMargins:{top:0.05,bottom:0.35}});
-chart.priceScale('vol').applyOptions({scaleMargins:{top:0.75,bottom:0}});
-const vwapSeries = chart.addLineSeries({color:'#ffd700',lineWidth:2});
-const smaSeries  = chart.addLineSeries({color:'#ff4444',lineWidth:2});
+function initSignalChart() {
+  signalChart = LightweightCharts.createChart(document.getElementById('signal-chart'), {
+    layout: { background: { color: '#1e1e1e' }, textColor: '#cccccc' },
+    grid: { vertLines: { color: '#2e2e2e' }, horzLines: { color: '#2e2e2e' } },
+    timeScale: {
+      timeVisible: true,
+      secondsVisible: false,
+      tickMarkFormatter: t => new Date(t * 1000).toLocaleTimeString(
+        'en-US', { timeZone: 'America/New_York', hour12: false, hour: '2-digit', minute: '2-digit' }
+      )
+    }
+  });
+  signalCandleSeries = signalChart.addCandlestickSeries({
+    upColor: '#26a69a', downColor: '#ef5350',
+    wickUpColor: '#26a69a', wickDownColor: '#ef5350', borderVisible: false
+  });
+  signalVolumeSeries = signalChart.addHistogramSeries({
+    color: '#888', priceFormat: { type: 'volume' },
+    priceScaleId: 'vol', scaleMargins: { top: 0.75, bottom: 0 }
+  });
+  signalChart.priceScale('right').applyOptions({ scaleMargins: { top: 0.05, bottom: 0.35 } });
+  signalChart.priceScale('vol').applyOptions({ scaleMargins: { top: 0.75, bottom: 0 } });
+  signalVwapSeries = signalChart.addLineSeries({ color: '#ffd700', lineWidth: 2 });
+  signalSmaSeries = signalChart.addLineSeries({ color: '#ff4444', lineWidth: 2 });
+}
 
 const date = "{{DATE}}";
 const ticker = "{{TICKER}}";
@@ -201,12 +240,12 @@ const signal = "{{SIGNAL}}".toLowerCase();
 const timeframe = "{{RESOLUTION}}";
 
 const NEW_COLUMNS = [
-  'market_cap','float','open_price','close_price','high_of_day','low_of_day',
-  'percent_gain_eod','max_spiking_up_percent','max_spiking_down_percent',
-  'volume','percent_gap_from_prior', 'prior_day_volume', 'pre_market_volume'
+  'market_cap', 'float', 'open_price', 'close_price', 'high_of_day', 'low_of_day',
+  'percent_gain_eod', 'max_spiking_up_percent', 'max_spiking_down_percent',
+  'volume', 'percent_gap_from_prior', 'prior_day_volume', 'pre_market_volume'
 ];
 
-function truncatedTooltip(cell){
+function truncatedTooltip(cell) {
   const el = cell.getElement();
   const textEl = el.querySelector('a') || el;
   if (textEl && (textEl.scrollWidth > textEl.clientWidth || textEl.scrollHeight > textEl.clientHeight)) {
@@ -215,11 +254,11 @@ function truncatedTooltip(cell){
   return false;
 }
 
-async function fetchExtendedData(ticker, date){
+async function fetchExtendedData(ticker, date) {
   console.debug('[extended] fetching for', ticker, date);
   try {
-    const {data} = await axios.get('/api/candles', {
-      params: {ticker, timeframe: '1m', date, extended: 'true'}
+    const { data } = await axios.get('/api/candles', {
+      params: { ticker, timeframe: '1m', date, extended: 'true' }
     });
     return data.minVolume;
   } catch (err) {
@@ -228,7 +267,7 @@ async function fetchExtendedData(ticker, date){
   }
 }
 
-async function calculatePreMarketVolume(ticker, currentDate, priorDate){
+async function calculatePreMarketVolume(ticker, currentDate, priorDate) {
   const priorExtVol = await fetchExtendedData(ticker, priorDate);
   const priorAfterHours = priorExtVol.filter(v => {
     const ts = new Date(v.time * 1000);
@@ -251,14 +290,14 @@ function formatNumber(num, isMarketCap = false) {
   if (num < 1000) return (isMarketCap ? '$' : '') + num.toFixed(1);
   if (num < 1000000) return (isMarketCap ? '$' : '') + (num / 1000).toFixed(1) + ' K';
   if (num < 100000000) return (isMarketCap ? '$' : '') + (num / 1000000).toFixed(1) + ' M';
-  if (num < 1000000000) return (isMarketCap ? '$' : '') + (num / 1000000).toLocaleString('en-US', {maximumFractionDigits: 1}) + ' M';
+  if (num < 1000000000) return (isMarketCap ? '$' : '') + (num / 1000000).toLocaleString('en-US', { maximumFractionDigits: 1 }) + ' M';
   if (num < 100000000000) return (isMarketCap ? '$' : '') + (num / 1000000000).toFixed(1) + ' B';
-  return (isMarketCap ? '$' : '') + (num / 1000000000).toLocaleString('en-US', {maximumFractionDigits: 1}) + ' B';
+  return (isMarketCap ? '$' : '') + (num / 1000000000).toLocaleString('en-US', { maximumFractionDigits: 1 }) + ' B';
 }
 
 async function fetchMarketCap(ticker) {
   try {
-    const {data} = await axios.get('/api/ticker-details', {params: {ticker}});
+    const { data } = await axios.get('/api/ticker-details', { params: { ticker } });
     const marketCap = data.results.market_cap || 0;
     return formatNumber(marketCap, true);
   } catch (err) {
@@ -269,7 +308,7 @@ async function fetchMarketCap(ticker) {
 
 async function fetchFloat(ticker) {
   try {
-    const {data} = await axios.get('/api/share-float', {params: {ticker}});
+    const { data } = await axios.get('/api/share-float', { params: { ticker } });
     const floatShares = data[0]?.floatShares || 0;
     return formatNumber(floatShares);
   } catch (err) {
@@ -278,24 +317,25 @@ async function fetchFloat(ticker) {
   }
 }
 
-async function loadChart(){
-  try{
-    const {data}=await axios.get('/api/chart-data',{params:{ticker, timeframe, date, time:timeStr}});
-    candleSeries.setData(data.candles);
-    volumeSeries.setData(data.volume);
-    vwapSeries.setData(data.vwap);
-    smaSeries.setData(data.sma);
+async function loadSignalChart() {
+  try {
+    initSignalChart();
+    const { data } = await axios.get('/api/chart-data', { params: { ticker, timeframe, date, time: timeStr } });
+    signalCandleSeries.setData(data.candles);
+    signalVolumeSeries.setData(data.volume);
+    signalVwapSeries.setData(data.vwap);
+    signalSmaSeries.setData(data.sma);
 
-    const ts=combineDateAndTime(date,timeStr)/1000;
-    const isBuy=signal==="buy";
-    candleSeries.setMarkers([{
-      time:ts,
-      position:isBuy?"belowBar":"aboveBar",
-      shape:isBuy?"arrowUp":"arrowDown",
-      color:isBuy?"#00ff00":"#ff3333",
-      size:2
+    const ts = combineDateAndTime(date, timeStr) / 1000;
+    const isBuy = signal === "buy";
+    signalCandleSeries.setMarkers([{
+      time: ts,
+      position: isBuy ? "belowBar" : "aboveBar",
+      shape: isBuy ? "arrowUp" : "arrowDown",
+      color: isBuy ? "#00ff00" : "#ff3333",
+      size: 2
     }]);
-    chart.timeScale().fitContent();
+    signalChart.timeScale().fitContent();
 
     const metrics = data.metrics;
 
@@ -325,78 +365,81 @@ async function loadChart(){
       pre_market_volume: Math.round(preVol).toLocaleString(),
     };
 
-    new Tabulator("#metrics-sheet", {
+    new Tabulator("#signal-metrics-sheet", {
       data: [row],
       layout: "fitColumns",
       headerWordWrap: true,
       tooltipsHeader: true,
       tooltips: truncatedTooltip,
       columns: [
-        {title: "TICKER", field: "ticker", minWidth: 80, headerSort: false, headerTooltip: true},
-        {title: "TIME", field: "time", minWidth: 80, headerSort: false, headerTooltip: true},
-        {title: "SIGNAL", field: "signal", minWidth: 80, headerSort: false, headerTooltip: true, formatter: function(cell) {
-          const val = cell.getValue().toLowerCase();
-          return `<span class="signal-${val}">${val.toUpperCase()}</span>`;
-        }},
-        {title: "MARKET CAP", field: "market_cap", minWidth: 80, headerSort: false, headerTooltip: true},
-        {title: "FLOAT", field: "float", minWidth: 80, headerSort: false, headerTooltip: true},
-        {title: "OPEN PRICE", field: "open_price", minWidth: 80, headerSort: false, headerTooltip: true},
-        {title: "CLOSE PRICE", field: "close_price", minWidth: 80, headerSort: false, headerTooltip: true},
-        {title: "HIGH OF DAY", field: "high_of_day", minWidth: 80, headerSort: false, headerTooltip: true},
-        {title: "LOW OF DAY", field: "low_of_day", minWidth: 80, headerSort: false, headerTooltip: true},
-        {title: "PERCENT GAIN EOD", field: "percent_gain_eod", minWidth: 80, headerSort: false, headerTooltip: true},
-        {title: "MAX SPIKING UP PERCENT", field: "max_spiking_up_percent", minWidth: 80, headerSort: false, headerTooltip: true},
-        {title: "MAX SPIKING DOWN PERCENT", field: "max_spiking_down_percent", minWidth: 80, headerSort: false, headerTooltip: true},
-        {title: "VOLUME", field: "volume", minWidth: 80, headerSort: false, headerTooltip: true},
-        {title: "PERCENT GAP FROM PRIOR", field: "percent_gap_from_prior", minWidth: 80, headerSort: false, headerTooltip: true},
-        {title: "PRIOR DAY VOLUME", field: "prior_day_volume", minWidth: 80, headerSort: false, headerTooltip: true},
-        {title: "PRE MARKET VOLUME", field: "pre_market_volume", minWidth: 80, headerSort: false, headerTooltip: true},
+        { title: "TICKER", field: "ticker", minWidth: 80, headerSort: false, headerTooltip: true },
+        { title: "TIME", field: "time", minWidth: 80, headerSort: false, headerTooltip: true },
+        {
+          title: "SIGNAL", field: "signal", minWidth: 80, headerSort: false, headerTooltip: true,
+          formatter: function(cell) {
+            const val = cell.getValue().toLowerCase();
+            return `<span class="signal-${val}">${val.toUpperCase()}</span>`;
+          }
+        },
+        { title: "MARKET CAP", field: "market_cap", minWidth: 80, headerSort: false, headerTooltip: true },
+        { title: "FLOAT", field: "float", minWidth: 80, headerSort: false, headerTooltip: true },
+        { title: "OPEN PRICE", field: "open_price", minWidth: 80, headerSort: false, headerTooltip: true },
+        { title: "CLOSE PRICE", field: "close_price", minWidth: 80, headerSort: false, headerTooltip: true },
+        { title: "HIGH OF DAY", field: "high_of_day", minWidth: 80, headerSort: false, headerTooltip: true },
+        { title: "LOW OF DAY", field: "low_of_day", minWidth: 80, headerSort: false, headerTooltip: true },
+        { title: "PERCENT GAIN EOD", field: "percent_gain_eod", minWidth: 80, headerSort: false, headerTooltip: true },
+        { title: "MAX SPIKING UP PERCENT", field: "max_spiking_up_percent", minWidth: 80, headerSort: false, headerTooltip: true },
+        { title: "MAX SPIKING DOWN PERCENT", field: "max_spiking_down_percent", minWidth: 80, headerSort: false, headerTooltip: true },
+        { title: "VOLUME", field: "volume", minWidth: 80, headerSort: false, headerTooltip: true },
+        { title: "PERCENT GAP FROM PRIOR", field: "percent_gap_from_prior", minWidth: 80, headerSort: false, headerTooltip: true },
+        { title: "PRIOR DAY VOLUME", field: "prior_day_volume", minWidth: 80, headerSort: false, headerTooltip: true },
+        { title: "PRE MARKET VOLUME", field: "pre_market_volume", minWidth: 80, headerSort: false, headerTooltip: true },
       ],
     });
 
     const newsItems = data.news || [];
-    new Tabulator("#news-sheet", {
+    new Tabulator("#signal-news-sheet", {
       data: newsItems,
       layout: "fitColumns",
       headerWordWrap: true,
       tooltipsHeader: true,
       tooltips: truncatedTooltip,
       columns: [
-        {title: "PUBLISHED", field: "published", minWidth: 150, headerSort: false, headerTooltip: true, vertAlign:"top", formatter: function(cell){
-          return new Date(cell.getValue()).toLocaleString();
-        }},
-        {title: "TITLE", field: "title", minWidth: 400, headerSort: false, headerTooltip: true, vertAlign:"top", formatter: "link", formatterParams: {
-          urlField: "url",
-          target: "_blank",
-          labelField: "title"
-        }},
-        {title: "SOURCE", field: "source", minWidth: 150, headerSort: false, headerTooltip: true, vertAlign:"top"},
+        {
+          title: "PUBLISHED", field: "published", minWidth: 150, headerSort: false, headerTooltip: true, vertAlign: "top",
+          formatter: function(cell) { return new Date(cell.getValue()).toLocaleString(); }
+        },
+        {
+          title: "TITLE", field: "title", minWidth: 400, headerSort: false, headerTooltip: true, vertAlign: "top",
+          formatter: "link", formatterParams: { urlField: "url", target: "_blank", labelField: "title" }
+        },
+        { title: "SOURCE", field: "source", minWidth: 150, headerSort: false, headerTooltip: true, vertAlign: "top" },
       ],
     });
 
     const filingsItems = data.filings || [];
-    new Tabulator("#filings-sheet", {
+    new Tabulator("#signal-filings-sheet", {
       data: filingsItems,
       layout: "fitColumns",
       headerWordWrap: true,
       tooltipsHeader: true,
       tooltips: truncatedTooltip,
       columns: [
-        {title: "FILED AT", field: "filedAt", minWidth: 150, headerSort: false, headerTooltip: true, vertAlign:"top", formatter: function(cell){
-          return new Date(cell.getValue()).toLocaleString();
-        }},
-        {title: "FORM TYPE", field: "formType", minWidth: 100, headerSort: false, headerTooltip: true, vertAlign:"top"},
-        {title: "DESCRIPTION", field: "description", minWidth: 400, headerSort: false, headerTooltip: true, vertAlign:"top", formatter: "link", formatterParams: {
-          urlField: "linkToFilingDetails",
-          target: "_blank",
-          labelField: "description"
-        }},
-        {title: "COMPANY", field: "companyName", minWidth: 200, headerSort: false, headerTooltip: true, vertAlign:"top"},
+        {
+          title: "FILED AT", field: "filedAt", minWidth: 150, headerSort: false, headerTooltip: true, vertAlign: "top",
+          formatter: function(cell) { return new Date(cell.getValue()).toLocaleString(); }
+        },
+        { title: "FORM TYPE", field: "formType", minWidth: 100, headerSort: false, headerTooltip: true, vertAlign: "top" },
+        {
+          title: "DESCRIPTION", field: "description", minWidth: 400, headerSort: false, headerTooltip: true, vertAlign: "top",
+          formatter: "link", formatterParams: { urlField: "linkToFilingDetails", target: "_blank", labelField: "description" }
+        },
+        { title: "COMPANY", field: "companyName", minWidth: 200, headerSort: false, headerTooltip: true, vertAlign: "top" },
       ],
     });
 
-    if (!listenersAdded) {
-      document.getElementById('copy-news').addEventListener('click', () => {
+    if (!signalListenersAdded) {
+      document.getElementById('signal-copy-news').addEventListener('click', () => {
         const jsonData = {
           ticker: ticker,
           news: newsItems.map(item => ({
@@ -414,7 +457,7 @@ async function loadChart(){
         });
       });
 
-      document.getElementById('copy-filings').addEventListener('click', () => {
+      document.getElementById('signal-copy-filings').addEventListener('click', () => {
         const jsonData = {
           ticker: ticker,
           filings: filingsItems.map(item => ({
@@ -432,13 +475,12 @@ async function loadChart(){
           alert('Failed to copy to clipboard.');
         });
       });
-      listenersAdded = true;
+      signalListenersAdded = true;
     }
 
     const profile = data.profile || {};
     if (Object.keys(profile).length > 0) {
-      const profileDiv = document.createElement('div');
-      profileDiv.className = 'profile-container';
+      const profileDiv = document.getElementById('signal-profile-container');
       profileDiv.innerHTML = `
         <h4>Company Profile (Easy Digest for Day Traders)</h4>
         <img src="${profile.image || ''}" alt="${profile.companyName || 'Company Logo'}">
@@ -456,19 +498,585 @@ async function loadChart(){
         <p><strong>IPO Date:</strong> ${profile.ipoDate || 'N/A'}</p>
         <p><strong>Is ETF:</strong> ${profile.isEtf ? 'Yes' : 'No'}</p>
       `;
-      document.querySelector('.container-fluid').appendChild(profileDiv);
     }
 
-  }catch(err){
-    console.error('[load] error',err);
+    // Resize chart after data is loaded
+    signalChart.resize(document.getElementById('signal-chart').clientWidth, 600);
+  } catch (err) {
+    console.error('[loadSignalChart] error', err);
   }
 }
 
-function combineDateAndTime(dateStr,HHMM){
-  const h=Number(HHMM.slice(0,2)),m=Number(HHMM.slice(2));
-  return new Date(`${dateStr}T${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:00-04:00`).getTime();
+function combineDateAndTime(dateStr, HHMM) {
+  const h = Number(HHMM.slice(0, 2)), m = Number(HHMM.slice(2));
+  return new Date(`${dateStr}T${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00-04:00`).getTime();
 }
 
-loadChart();
+// Base Chart Logic
+let baseListenersAdded = false;
+let baseCsvData = [], baseCurrentRow = 0, baseIsCsvUploaded = false;
+let baseChart, baseCandleSeries, baseVolumeSeries, baseVwapSeries, baseSmaSeries;
+let baseCachedCandles = [], baseCachedVolume = [], baseCachedMinCandles = [], baseCachedMinVolume = [];
+let basePriorDayCloses = {}, basePriorDayVolumes = {}, basePriorDayDates = {};
+let baseCurrentNews = [], baseCurrentFilings = [];
+
+function initBaseChart() {
+  baseChart = LightweightCharts.createChart(document.getElementById('base-chart'), {
+    layout: { background: { color: '#1e1e1e' }, textColor: '#cccccc' },
+    grid: { vertLines: { color: '#2e2e2e' }, horzLines: { color: '#2e2e2e' } },
+    timeScale: {
+      timeVisible: true,
+      secondsVisible: false,
+      tickMarkFormatter: t => new Date(t * 1000).toLocaleTimeString(
+        'en-US', { timeZone: 'America/New_York', hour12: false, hour: '2-digit', minute: '2-digit' }
+      )
+    }
+  });
+  baseCandleSeries = baseChart.addCandlestickSeries({
+    upColor: '#26a69a', downColor: '#ef5350',
+    wickUpColor: '#26a69a', wickDownColor: '#ef5350', borderVisible: false
+  });
+  baseVolumeSeries = baseChart.addHistogramSeries({
+    color: '#888', priceFormat: { type: 'volume' },
+    priceScaleId: 'vol', scaleMargins: { top: 0.75, bottom: 0 }
+  });
+  baseChart.priceScale('right').applyOptions({ scaleMargins: { top: 0.05, bottom: 0.35 } });
+  baseChart.priceScale('vol').applyOptions({ scaleMargins: { top: 0.75, bottom: 0 } });
+  baseVwapSeries = baseChart.addLineSeries({ color: '#ffd700', lineWidth: 2 });
+  baseSmaSeries = baseChart.addLineSeries({ color: '#ff4444', lineWidth: 2 });
+}
+
+const nyFormatter = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit'
+});
+const currentNyDate = nyFormatter.format(new Date());
+flatpickr('#base-date', { dateFormat: 'Y-m-d', defaultDate: date || currentNyDate });
+
+const nyTimeFormatter = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'America/New_York',
+  hour: 'numeric',
+  minute: 'numeric',
+  hour12: false
+});
+
+function getNyTime(dateStr, h, m) {
+  return new Date(dateStr + 'T' + h.toString().padStart(2, '0') + ':' + m.toString().padStart(2, '0') + ':00-04:00');
+}
+
+async function fetchBasePriorDayClose(ticker, date) {
+  const key = ticker.toUpperCase();
+  if (basePriorDayCloses[key]) return;
+  let d = new Date(date);
+  d.setDate(d.getDate() - 1);
+  const to_date = d.toISOString().split('T')[0];
+  d.setDate(d.getDate() - 30);
+  const from_date = d.toISOString().split('T')[0];
+  console.debug('[basePriorDay] fetching', key, from_date, to_date);
+  try {
+    const { data } = await axios.get('/api/candles', {
+      params: { ticker: key, timeframe: '1d', from: from_date, to: to_date }
+    });
+    if (data.candles && data.candles.length > 0) {
+      const last = data.candles[data.candles.length - 1];
+      basePriorDayCloses[key] = last.close;
+      basePriorDayVolumes[key] = data.volume[data.volume.length - 1].value;
+      basePriorDayDates[key] = new Date(last.time * 1000).toISOString().split('T')[0];
+      console.debug('[basePriorDay] close', key, last.close);
+      return;
+    } else {
+      console.warn('[basePriorDay] no candles', from_date, to_date);
+    }
+  } catch (err) {
+    console.warn('[basePriorDay] error', err);
+  }
+}
+
+async function loadBaseChart(e, skipDefaultRow = false) {
+  if (e) e.preventDefault();
+  const baseTicker = ticker;
+  const baseTimeframe = timeframe;
+  const baseDate = date;
+
+  document.getElementById('base-ticker').value = baseTicker;
+  document.getElementById('base-timeframe').value = baseTimeframe;
+  document.getElementById('base-date').value = baseDate;
+
+  console.debug('[baseLoad] requesting', { ticker: baseTicker, timeframe: baseTimeframe, date: baseDate });
+  if (!baseTicker || !baseTimeframe || !baseDate) {
+    alert('Fill all fields');
+    return;
+  }
+  try {
+    if (!baseChart) {
+      initBaseChart();
+    }
+    const { data } = await axios.get('/api/candles', { params: { ticker: baseTicker, timeframe: baseTimeframe, date: baseDate } });
+    console.debug('[baseLoad] received', data.candles.length, 'bars');
+    if (!data.candles.length) {
+      console.warn('[baseLoad] no candles', baseTicker, baseDate, baseTimeframe);
+    }
+
+    await fetchBasePriorDayClose(baseTicker, baseDate);
+
+    let multMin;
+    switch (baseTimeframe) {
+      case '1m': multMin = 1; break;
+      case '2m': multMin = 2; break;
+      case '3m': multMin = 3; break;
+      case '5m': multMin = 5; break;
+      case '10m': multMin = 10; break;
+      case '15m': multMin = 15; break;
+      case '30m': multMin = 30; break;
+      case '1h': multMin = 60; break;
+      default: multMin = 1;
+    }
+
+    if (data.minCandles.length > 0) {
+      let lastTime = data.minCandles[data.minCandles.length - 1].time;
+      let lastClose = data.minCandles[data.minCandles.length - 1].close;
+      let nextTime = lastTime + 60;
+      const endTime = getNyTime(baseDate, 16, 0).getTime() / 1000;
+      while (nextTime < endTime) {
+        data.minCandles.push({ time: nextTime, open: lastClose, high: lastClose, low: lastClose, close: lastClose });
+        data.minVolume.push({ time: nextTime, value: 0 });
+        nextTime += 60;
+      }
+    } else {
+      data.minCandles = [];
+      data.minVolume = [];
+    }
+
+    let cumPV = 0, cumV = 0;
+    data.vwap = [];
+    for (let i = 0; i < data.minCandles.length; i++) {
+      const c = data.minCandles[i];
+      const v = data.minVolume[i].value;
+      const typ = (c.high + c.low + c.close) / 3;
+      cumPV += typ * v;
+      cumV += v;
+      if (cumV > 0) {
+        data.vwap.push({ time: c.time, value: cumPV / cumV });
+      } else if (data.vwap.length > 0) {
+        data.vwap.push({ time: c.time, value: data.vwap[data.vwap.length - 1].value });
+      }
+    }
+
+    const aggCandles = [], aggVolume = [];
+    for (let i = 0; i < data.minCandles.length; i += multMin) {
+      const end = Math.min(i + multMin, data.minCandles.length);
+      const group = data.minCandles.slice(i, end);
+      if (group.length === 0) break;
+      const o = group[0].open;
+      let h = group[0].high, l = group[0].low;
+      for (const g of group) {
+        if (g.high > h) h = g.high;
+        if (g.low < l) l = g.low;
+      }
+      const c = group[group.length - 1].close;
+      let v = 0;
+      for (let j = i; j < end; j++) {
+        v += data.minVolume[j].value;
+      }
+      aggCandles.push({ time: group[0].time, open: o, high: h, low: l, close: c });
+      aggVolume.push({ time: group[0].time, value: v });
+    }
+    data.candles = aggCandles;
+    data.volume = aggVolume;
+
+    let sum = 0;
+    data.sma = [];
+    for (let i = 0; i < data.candles.length; i++) {
+      sum += data.candles[i].close;
+      if (i >= 9) sum -= data.candles[i - 9].close;
+      if (i >= 8) data.sma.push({ time: data.candles[i].time, value: sum / 9 });
+    }
+
+    baseCachedCandles = data.candles;
+    baseCachedVolume = data.volume;
+    baseCachedMinCandles = data.minCandles;
+    baseCachedMinVolume = data.minVolume;
+
+    baseCandleSeries.setData(data.candles);
+    baseVolumeSeries.setData(data.volume);
+    baseVwapSeries.setData(data.vwap);
+    baseSmaSeries.setData(data.sma);
+    baseCandleSeries.setMarkers([]);
+    baseChart.timeScale().fitContent();
+
+    await displayBaseExtra(baseTicker, baseDate);
+
+    if (baseCsvData.length === 1 && baseCsvData[0].ticker.toUpperCase() !== baseTicker.toUpperCase() && !baseIsCsvUploaded) {
+      baseCsvData = [];
+      baseTable.setData([]);
+    }
+
+    if (baseCsvData.length === 0 && !skipDefaultRow) {
+      if (baseCachedMinCandles.length === 0) {
+        baseCandleSeries.setData([]);
+        baseVolumeSeries.setData([]);
+        baseVwapSeries.setData([]);
+        baseSmaSeries.setData([]);
+        return;
+      }
+      const row = { ticker: baseTicker.toUpperCase(), time: '0930', signal: 'buy' };
+      NEW_COLUMNS.forEach(col => row[col] = '');
+      await calculateBaseMetricsForRow(row);
+      baseCsvData = [{ __row: 0, ...row }];
+      const allFields = ['ticker', 'time', 'signal', ...NEW_COLUMNS];
+      const cols = allFields.map(h => ({
+        title: h.toUpperCase().replace(/_/g, ' '),
+        field: h,
+        editor: "input",
+        minWidth: 80,
+        headerSort: false,
+        headerTooltip: true
+      }));
+      cols.unshift({ title: "#", formatter: "rownum", hozAlign: "center", width: 40, frozen: true });
+      baseTable.setColumns(cols);
+      baseTable.setData(baseCsvData).then(() => {
+        baseCurrentRow = 0;
+        updateBaseTableView();
+        showBaseSignalOnChart(baseCsvData[baseCurrentRow]);
+      });
+    }
+
+    // Resize chart after data is loaded
+    baseChart.resize(document.getElementById('base-chart').clientWidth, 600);
+  } catch (err) {
+    console.error('[baseLoad] error', err);
+    alert('Error: ' + (err.response?.data || err));
+  }
+}
+
+let baseTable;
+function setupBaseTable() {
+  baseTable = new Tabulator("#base-sheet", {
+    data: [],
+    index: "__row",
+    layout: "fitColumns",
+    headerWordWrap: true,
+    tooltipsHeader: true,
+    tooltips: truncatedTooltip,
+    columns: [],
+    cellEdited: cell => {
+      const rowIdx = cell.getRow().getData().__row;
+      const field = cell.getField();
+      const value = cell.getValue();
+      baseCsvData[rowIdx][field] = value;
+      console.debug('[baseEdit]', rowIdx, field, value);
+    },
+  });
+}
+setupBaseTable();
+
+async function calculateBaseMetricsForRow(row) {
+  if (!baseCachedMinCandles.length) return;
+  const rowTime = row.time;
+  if (!rowTime) return;
+
+  const relevant = baseCachedMinCandles;
+
+  if (relevant.length > 0) {
+    const openPrice = relevant[0].open;
+    const eodClose = relevant[relevant.length - 1].close;
+    const highOfDay = Math.max(...relevant.map(c => c.high));
+    const lowOfDay = Math.min(...relevant.map(c => c.low));
+
+    row.open_price = openPrice.toFixed(2);
+    row.close_price = eodClose.toFixed(2);
+    row.high_of_day = highOfDay.toFixed(2);
+    row.low_of_day = lowOfDay.toFixed(2);
+
+    if (openPrice > 0) {
+      let gain = ((eodClose - openPrice) / openPrice * 100).toFixed(2);
+      if (row.signal.toLowerCase() === 'sell') {
+        gain = ((openPrice - eodClose) / openPrice * 100).toFixed(2);
+      }
+      row.percent_gain_eod = gain;
+      row.max_spiking_up_percent = ((highOfDay - openPrice) / openPrice * 100).toFixed(2);
+      row.max_spiking_down_percent = ((openPrice - lowOfDay) / openPrice * 100).toFixed(2);
+    }
+
+    if (baseCachedMinVolume.length) {
+      const relevantVolume = baseCachedMinVolume;
+      const totalVol = relevantVolume.reduce((s, v) => s + v.value, 0);
+      row.volume = Math.round(totalVol).toLocaleString();
+    }
+
+    const ticker = row.ticker.toUpperCase();
+    if (basePriorDayCloses[ticker]) {
+      const prior = basePriorDayCloses[ticker];
+      row.percent_gap_from_prior = ((openPrice - prior) / prior * 100).toFixed(2);
+    }
+
+    if (basePriorDayVolumes[ticker]) {
+      row.prior_day_volume = Math.round(basePriorDayVolumes[ticker]).toLocaleString();
+    }
+
+    const priorDate = basePriorDayDates[ticker] || '';
+    let preVol = 0;
+    if (priorDate) {
+      preVol = await calculatePreMarketVolume(ticker, date, priorDate);
+    }
+    row.pre_market_volume = Math.round(preVol).toLocaleString();
+
+    row.market_cap = await fetchMarketCap(ticker);
+    row.float = await fetchFloat(ticker);
+  }
+}
+
+async function displayBaseExtra(ticker, date) {
+  try {
+    const { data } = await axios.get('/api/extra', { params: { ticker, date, days: 2 } });
+
+    baseCurrentNews = data.news || [];
+    new Tabulator("#base-news-sheet", {
+      data: baseCurrentNews,
+      layout: "fitColumns",
+      headerWordWrap: true,
+      tooltipsHeader: true,
+      tooltips: truncatedTooltip,
+      columns: [
+        {
+          title: "PUBLISHED", field: "published", minWidth: 150, headerSort: false, headerTooltip: true, vertAlign: "top",
+          formatter: function(cell) { return new Date(cell.getValue()).toLocaleString(); }
+        },
+        {
+          title: "TITLE", field: "title", minWidth: 400, headerSort: false, headerTooltip: true, vertAlign: "top",
+          formatter: "link", formatterParams: { urlField: "url", target: "_blank", labelField: "title" }
+        },
+        { title: "SOURCE", field: "source", minWidth: 150, headerSort: false, headerTooltip: true, vertAlign: "top" },
+      ],
+    });
+
+    baseCurrentFilings = data.filings || [];
+    new Tabulator("#base-filings-sheet", {
+      data: baseCurrentFilings,
+      layout: "fitColumns",
+      headerWordWrap: true,
+      tooltipsHeader: true,
+      tooltips: truncatedTooltip,
+      columns: [
+        {
+          title: "FILED AT", field: "filedAt", minWidth: 150, headerSort: false, headerTooltip: true, vertAlign: "top",
+          formatter: function(cell) { return new Date(cell.getValue()).toLocaleString(); }
+        },
+        { title: "FORM TYPE", field: "formType", minWidth: 100, headerSort: false, headerTooltip: true, vertAlign: "top" },
+        {
+          title: "DESCRIPTION", field: "description", minWidth: 400, headerSort: false, headerTooltip: true, vertAlign: "top",
+          formatter: "link", formatterParams: { urlField: "linkToFilingDetails", target: "_blank", labelField: "description" }
+        },
+        { title: "COMPANY", field: "companyName", minWidth: 200, headerSort: false, headerTooltip: true, vertAlign: "top" },
+      ],
+    });
+
+    const profile = data.profile || [];
+    const profileContainer = document.getElementById('base-profile-container');
+    profileContainer.innerHTML = '';
+    if (profile.length > 0) {
+      const prof = profile[0];
+      profileContainer.innerHTML = `
+        <h4>Company Profile (Easy Digest for Day Traders)</h4>
+        <img src="${prof.image || ''}" alt="${prof.companyName || 'Company Logo'}">
+        <h5>${prof.companyName || 'N/A'}</h5>
+        <p><strong>Exchange:</strong> ${prof.exchange || 'N/A'}</p>
+        <p><strong>Industry:</strong> ${prof.industry || 'N/A'}</p>
+        <p><strong>Sector:</strong> ${prof.sector || 'N/A'}</p>
+        <p><strong>Country/State:</strong> ${prof.country || 'N/A'} / ${prof.state || 'N/A'}</p>
+        <p><strong>Full-time Employees:</strong> ${prof.fullTimeEmployees ? Number(prof.fullTimeEmployees).toLocaleString() : 'N/A'}</p>
+        <p><strong>Beta:</strong> ${prof.beta ? Number(prof.beta).toFixed(2) : 'N/A'}</p>
+        <p><strong>Last Dividend:</strong> ${prof.lastDividend ? Number(prof.lastDividend).toFixed(2) : 'N/A'}</p>
+        <p><strong>52W Range:</strong> ${prof.range || 'N/A'}</p>
+        <p><strong>Website:</strong> <a href="${prof.website || '#'}" target="_blank" rel="noopener noreferrer">${prof.website || 'N/A'}</a></p>
+        <p><strong>Description:</strong> ${prof.description || 'N/A'}</p>
+        <p><strong>IPO Date:</strong> ${prof.ipoDate || 'N/A'}</p>
+        <p><strong>Is ETF:</strong> ${prof.isEtf ? 'Yes' : 'No'}</p>
+      `;
+    }
+  } catch (err) {
+    console.error('[displayBaseExtra] error', err);
+  }
+}
+
+function updateBaseTableView() {
+  baseTable.setFilter("__row", "=", baseCurrentRow);
+  baseTable.getColumns().forEach(col => {
+    const field = col.getField();
+    if (field === "__row") { col.hide(); return; }
+    col.show();
+  });
+  document.getElementById('base-row-indicator').textContent = `${baseCurrentRow + 1}/${baseCsvData.length}`;
+}
+
+async function showBaseSignalOnChart(row) {
+  console.debug('[baseShow] row →', row);
+  const currentTicker = ticker;
+  if (row.ticker.toUpperCase() !== currentTicker.toUpperCase()) {
+    document.getElementById('base-ticker').value = row.ticker.toUpperCase();
+    await loadBaseChart(null, true);
+  }
+
+  await calculateBaseMetricsForRow(row);
+  baseTable.updateData([row]);
+
+  const ts = combineDateAndTime(date, row.time);
+  const isBuy = row.signal.toLowerCase() === "buy";
+  baseCandleSeries.setMarkers([{
+    time: ts / 1000,
+    position: isBuy ? "belowBar" : "aboveBar",
+    shape: isBuy ? "arrowUp" : "arrowDown",
+    color: isBuy ? "#00ff00" : "#ff3333",
+    size: 2
+  }]);
+}
+
+document.getElementById('base-form').addEventListener('submit', loadBaseChart);
+document.getElementById('base-csvFile').addEventListener('change', async e => {
+  baseIsCsvUploaded = true;
+  const file = e.target.files[0];
+  if (!file) return;
+  const text = await file.text();
+  const p = Papa.parse(text.trim(), { header: true, skipEmptyLines: true });
+  baseCsvData = p.data.map((r, i) => ({ __row: i, ...r }));
+  if (!baseCsvData.length) {
+    alert("CSV seems empty");
+    return;
+  }
+
+  baseCsvData.forEach(row => {
+    NEW_COLUMNS.forEach(col => { if (!(col in row)) row[col] = ""; });
+  });
+
+  const allFields = [...new Set([...p.meta.fields, ...NEW_COLUMNS])];
+  const cols = allFields.map(h => ({
+    title: h.toUpperCase().replace(/_/g, ' '),
+    field: h,
+    editor: "input",
+    minWidth: 80,
+    headerSort: false,
+    headerTooltip: true
+  }));
+  cols.unshift({ title: "#", formatter: "rownum", hozAlign: "center", width: 40, frozen: true });
+
+  baseTable.setColumns(cols);
+  baseTable.setData(baseCsvData).then(() => {
+    baseCurrentRow = 0;
+    console.debug('[baseCSV] loaded', baseCsvData.length, 'rows');
+    updateBaseTableView();
+    console.debug('[baseCSV] showing row', baseCurrentRow, baseCsvData[baseCurrentRow]);
+    showBaseSignalOnChart(baseCsvData[baseCurrentRow]);
+  });
+});
+
+document.getElementById('base-addColumn').onclick = () => {
+  const name = document.getElementById('base-newColumn').value.trim();
+  if (!name) return;
+  baseCsvData.forEach(r => r[name] = "");
+  baseTable.addColumn({ title: name, field: name, editor: "input", headerTooltip: true });
+  document.getElementById('base-newColumn').value = "";
+};
+
+document.getElementById('base-prevRow').onclick = () => {
+  if (baseCurrentRow > 0) {
+    baseCurrentRow--;
+    console.debug('[baseNav] prev →', baseCurrentRow, baseCsvData[baseCurrentRow]);
+    updateBaseTableView();
+    showBaseSignalOnChart(baseCsvData[baseCurrentRow]);
+  }
+};
+
+document.getElementById('base-nextRow').onclick = () => {
+  if (baseCurrentRow < baseCsvData.length - 1) {
+    baseCurrentRow++;
+    console.debug('[baseNav] next →', baseCurrentRow, baseCsvData[baseCurrentRow]);
+    updateBaseTableView();
+    showBaseSignalOnChart(baseCsvData[baseCurrentRow]);
+  }
+};
+
+document.getElementById('base-downloadCsv').onclick = () => {
+  if (!baseCsvData.length) return;
+  const out = baseCsvData.map(({ __row, ...r }) => r);
+  const csv = Papa.unparse(out);
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+  a.download = "signals_edited.csv";
+  a.click();
+};
+
+document.getElementById('base-toggleSignal').addEventListener('click', () => {
+  if (baseCsvData.length === 0) return;
+  const row = baseCsvData[baseCurrentRow];
+  row.signal = row.signal.toLowerCase() === 'buy' ? 'sell' : 'buy';
+  calculateBaseMetricsForRow(row).then(() => {
+    baseTable.updateData([row]);
+    showBaseSignalOnChart(row);
+  });
+});
+
+if (!baseListenersAdded) {
+  document.getElementById('base-copy-news').addEventListener('click', () => {
+    if (baseCurrentNews.length === 0) {
+      alert('No news data available.');
+      return;
+    }
+    const jsonData = {
+      ticker: ticker,
+      news: baseCurrentNews.map(item => ({
+        published: item.published,
+        title: item.title,
+        source: item.source,
+        url: item.url
+      }))
+    };
+    navigator.clipboard.writeText(JSON.stringify(jsonData, null, 2)).then(() => {
+      alert('News JSON copied to clipboard!');
+    }).catch(err => {
+      console.error('Failed to copy: ', err);
+      alert('Failed to copy to clipboard.');
+    });
+  });
+
+  document.getElementById('base-copy-filings').addEventListener('click', () => {
+    if (baseCurrentFilings.length === 0) {
+      alert('No filings data available.');
+      return;
+    }
+    const jsonData = {
+      ticker: ticker,
+      filings: baseCurrentFilings.map(item => ({
+        filedAt: item.filedAt,
+        formType: item.formType,
+        description: item.description,
+        companyName: item.companyName,
+        url: item.linkToFilingDetails
+      }))
+    };
+    navigator.clipboard.writeText(JSON.stringify(jsonData, null, 2)).then(() => {
+      alert('SEC Filings JSON copied to clipboard!');
+    }).catch(err => {
+      console.error('Failed to copy: ', err);
+      alert('Failed to copy to clipboard.');
+    });
+  });
+  baseListenersAdded = true;
+}
+
+// Tab switch handling
+document.getElementById('signal-tab').addEventListener('shown.bs.tab', () => {
+  if (signalChart) {
+    signalChart.resize(document.getElementById('signal-chart').clientWidth, 600);
+  }
+});
+
+document.getElementById('base-tab').addEventListener('shown.bs.tab', () => {
+  if (!baseChart) {
+    initBaseChart();
+  }
+  loadBaseChart();
+});
+
+// Initialize Signal Chart
+loadSignalChart();
 </script>
 </html>
