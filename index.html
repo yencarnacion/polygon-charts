@@ -51,8 +51,18 @@
 
     #sheet .tabulator-cell, #news-sheet .tabulator-cell, #filings-sheet .tabulator-cell{
       background:#2a2a2a;
-      color:#e0e0e0;
+      color:#000000;
       user-select:text;
+    }
+
+    /* ── Sheet header text ── */
+    #sheet .tabulator-col-title{
+      color:#ffffff !important;   /* black TICKER, TIME, SIGNAL… */
+    }
+
+    /* ── Sheet body cell text ── */
+    #sheet .tabulator-cell{
+      color:#ffffff !important;  
     }
 
     #sheet .tabulator-row-even, #news-sheet .tabulator-row-even, #filings-sheet .tabulator-row-even {background-color:#252525;}
