@@ -233,6 +233,12 @@ let currentFilings = [];
 let listenersAdded = false;
 let isCsvUploaded = false; // Flag to track if CSV was uploaded
 
+const nyTime = ts =>
+  new Date(ts * 1000).toLocaleTimeString(
+    'en-US',
+    { timeZone: 'America/New_York', hour12: false, hour: '2-digit', minute: '2-digit' }
+  );
+  
 /* ─── Date picker with current NY date default ───────────── */
 const nyFormatter = new Intl.DateTimeFormat('en-CA',{
   timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit'});
@@ -254,10 +260,12 @@ function getNyTime(dateStr, h, m) {
 const chart = LightweightCharts.createChart(document.getElementById('chart'),{
   layout:{background:{color:'#1e1e1e'},textColor:'#cccccc'},
   grid:{vertLines:{color:'#2e2e2e'},horzLines:{color:'#2e2e2e'}},
-  timeScale:{timeVisible:true,secondsVisible:false,
-    tickMarkFormatter:t=>new Date(t*1000).toLocaleTimeString(
-      'en-US',{timeZone:'America/New_York',hour12:false,hour:'2-digit',minute:'2-digit'})}
+  timeScale:{timeVisible:true,secondsVisible:false},
+  localization:{ timeFormatter: nyTime }    // ★ cross‑hair label
 });
+
+chart.timeScale().applyOptions({ tickMarkFormatter: nyTime }); // ★ axis ticks
+  
 const candleSeries = chart.addCandlestickSeries({
   upColor:'#26a69a',downColor:'#ef5350',
   wickUpColor:'#26a69a',wickDownColor:'#ef5350',borderVisible:false});
@@ -714,7 +722,7 @@ document.getElementById('nextRow').onclick=()=>{
 /* ─── Show signal on chart ───────────────────────────────── */
 function combineDateAndTime(dateStr,HHMM){
   const h=parseInt(HHMM.slice(0,2)),m=parseInt(HHMM.slice(2,4));
-  return new Date(`${dateStr}T${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:00-04:00`).getTime();
+  return new Date(`${dateStr}T${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:00`).getTime();
 }
 async function showSignalOnChart(row){
   console.debug('[show] row →',row);

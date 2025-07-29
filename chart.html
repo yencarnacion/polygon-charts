@@ -207,18 +207,23 @@
 let signalListenersAdded = false;
 let signalChart, signalCandleSeries, signalVolumeSeries, signalVwapSeries, signalSmaSeries;
 
+const nyTime = ts =>
+  new Date(ts * 1000).toLocaleTimeString(
+    'en-US',
+    { timeZone: 'America/New_York', hour12: false, hour: '2-digit', minute: '2-digit' }
+  );
+
+  
+  
 function initSignalChart() {
-  signalChart = LightweightCharts.createChart(document.getElementById('signal-chart'), {
-    layout: { background: { color: '#1e1e1e' }, textColor: '#cccccc' },
-    grid: { vertLines: { color: '#2e2e2e' }, horzLines: { color: '#2e2e2e' } },
-    timeScale: {
-      timeVisible: true,
-      secondsVisible: false,
-      tickMarkFormatter: t => new Date(t * 1000).toLocaleTimeString(
-        'en-US', { timeZone: 'America/New_York', hour12: false, hour: '2-digit', minute: '2-digit' }
-      )
-    }
-  });
+   signalChart = LightweightCharts.createChart(document.getElementById('signal-chart'),{
+  layout:{background:{color:'#1e1e1e'},textColor:'#cccccc'},
+  grid:{vertLines:{color:'#2e2e2e'},horzLines:{color:'#2e2e2e'}},
+  timeScale:{timeVisible:true,secondsVisible:false},
+  localization:{ timeFormatter: nyTime }    // ★ cross‑hair label
+});
+
+signalChart.timeScale().applyOptions({ tickMarkFormatter: nyTime }); // ★ axis ticks    
   signalCandleSeries = signalChart.addCandlestickSeries({
     upColor: '#26a69a', downColor: '#ef5350',
     wickUpColor: '#26a69a', wickDownColor: '#ef5350', borderVisible: false
@@ -509,7 +514,7 @@ async function loadSignalChart() {
 
 function combineDateAndTime(dateStr, HHMM) {
   const h = Number(HHMM.slice(0, 2)), m = Number(HHMM.slice(2));
-  return new Date(`${dateStr}T${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00-04:00`).getTime();
+  return new Date(`${dateStr}T${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00`).getTime();
 }
 
 // Base Chart Logic
@@ -521,17 +526,15 @@ let basePriorDayCloses = {}, basePriorDayVolumes = {}, basePriorDayDates = {};
 let baseCurrentNews = [], baseCurrentFilings = [];
 
 function initBaseChart() {
-  baseChart = LightweightCharts.createChart(document.getElementById('base-chart'), {
-    layout: { background: { color: '#1e1e1e' }, textColor: '#cccccc' },
-    grid: { vertLines: { color: '#2e2e2e' }, horzLines: { color: '#2e2e2e' } },
-    timeScale: {
-      timeVisible: true,
-      secondsVisible: false,
-      tickMarkFormatter: t => new Date(t * 1000).toLocaleTimeString(
-        'en-US', { timeZone: 'America/New_York', hour12: false, hour: '2-digit', minute: '2-digit' }
-      )
-    }
-  });
+ baseChart = LightweightCharts.createChart(document.getElementById('base-chart'),{
+  layout:{background:{color:'#1e1e1e'},textColor:'#cccccc'},
+  grid:{vertLines:{color:'#2e2e2e'},horzLines:{color:'#2e2e2e'}},
+  timeScale:{timeVisible:true,secondsVisible:false},
+  localization:{ timeFormatter: nyTime }    // ★ cross‑hair label
+});
+
+baseChart.timeScale().applyOptions({ tickMarkFormatter: nyTime }); // ★ axis ticks
+    
   baseCandleSeries = baseChart.addCandlestickSeries({
     upColor: '#26a69a', downColor: '#ef5350',
     wickUpColor: '#26a69a', wickDownColor: '#ef5350', borderVisible: false
