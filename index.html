@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8"/>
-  <title>Candlestick + Signals Viewer (Debug Mode)</title>
+  <title>Candlestick + Signals Viewer</title>
 
   <!-- Bootstrap & Flatpickr -->
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
@@ -13,7 +13,7 @@
 
   <style>
     body { margin:1rem; background:#121212; color:#e0e0e0 }
-    #chart { height:600px; }
+    #chart { width: 100%; height:600px; box-sizing: border-box; }
 
     .form-control, .form-select {
       background:#1e1e1e!important;
@@ -22,7 +22,7 @@
     }
 
     /* ─── Grid / Sheet Styling ─────────────────────────────── */
-    #sheet, #news-sheet, #filings-sheet { margin-top:1rem; max-width:100%; overflow-x:hidden; }
+    #sheet, #news-sheet, #filings-sheet { margin-top:1rem; max-width:100%; overflow-x:auto; }
 
     /* Header container */
     #sheet .tabulator-header, #news-sheet .tabulator-header, #filings-sheet .tabulator-header {
@@ -143,6 +143,19 @@
       border-radius: 4px;
     }
 
+    /* Improved hover for readability */
+    .tabulator-row:hover .tabulator-cell {
+      background-color: #3a3a3a !important;
+      color: #ffffff !important;
+    }
+
+    .tabulator-col:hover {
+      background-color: #111111 !important;
+    }
+
+    .tabulator-row:hover {
+      background-color: #3a3a3a !important;
+    }
   </style>
 </head>
 <body>
@@ -168,6 +181,7 @@
   <button id="addColumn" class="btn btn-outline-success btn-sm">Add Column</button>
   <button id="prevRow" class="btn btn-outline-light btn-sm">▲ Prev</button>
   <button id="nextRow" class="btn btn-outline-light btn-sm">▼ Next</button>
+  <button id="toggleSignal" class="btn btn-outline-light btn-sm">Toggle Signal</button>
   <button id="downloadCsv" class="btn btn-secondary btn-sm ms-auto">Export CSV</button>
 </div>
 
@@ -202,15 +216,29 @@
 <script src="https://cdn.jsdelivr.net/npm/tabulator-tables@5.4.4/dist/js/tabulator.min.js"></script>
 
 <script>
+// Updated to fix table population issues
+
 let currentNews = [];
 let currentFilings = [];
 let listenersAdded = false;
+let isCsvUploaded = false; // Flag to track if CSV was uploaded
 
 /* ─── Date picker with current NY date default ───────────── */
 const nyFormatter = new Intl.DateTimeFormat('en-CA',{
   timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit'});
 const currentNyDate = nyFormatter.format(new Date());
 flatpickr('#date',{dateFormat:'Y-m-d',defaultDate:currentNyDate});
+
+const nyTimeFormatter = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'America/New_York',
+  hour: 'numeric',
+  minute: 'numeric',
+  hour12: false
+});
+
+function getNyTime(dateStr, h, m) {
+  return new Date(dateStr + 'T' + h.toString().padStart(2,'0') + ':' + m.toString().padStart(2,'0') + ':00-04:00');
+}
 
 /* ─── Chart setup ─────────────────────────────────────────── */
 const chart = LightweightCharts.createChart(document.getElementById('chart'),{
@@ -238,9 +266,10 @@ let cachedMinCandles = [];
 let cachedMinVolume  = [];
 let priorDayCloses   = {};   // Store prior‑day closes
 let priorDayVolumes = {}; // New: Store prior-day RTH volumes
+let priorDayDates = {};
 
 /* ─── Load candles with debug logging ────────────────────── */
-async function load(e){
+async function load(e, skipDefaultRow = false){
   if(e) e.preventDefault();
   const ticker   = document.getElementById('ticker').value.trim();
   const timeframe= document.getElementById('timeframe').value;
@@ -251,6 +280,93 @@ async function load(e){
     const {data}=await axios.get('/api/candles',{params:{ticker,timeframe,date}});
     console.debug('[load] received',data.candles.length,'bars');
     if(!data.candles.length){console.warn('[load] no candles',ticker,date,timeframe);}
+
+    await fetchPriorDayClose(ticker,date);
+
+    // Determine multMin for aggregation
+    let multMin;
+    switch(timeframe) {
+      case '1m': multMin = 1; break;
+      case '2m': multMin = 2; break;
+      case '3m': multMin = 3; break;
+      case '5m': multMin = 5; break;
+      case '10m': multMin = 10; break;
+      case '15m': multMin = 15; break;
+      case '30m': multMin = 30; break;
+      case '1h': multMin = 60; break;
+      default: multMin = 1;
+    }
+
+    // Extend minCandles and minVolume to 16:00 if necessary
+    if (data.minCandles.length > 0) {
+      let lastTime = data.minCandles[data.minCandles.length - 1].time;
+      let lastClose = data.minCandles[data.minCandles.length - 1].close;
+      let nextTime = lastTime + 60;
+      const endTime = getNyTime(date, 16, 0).getTime() / 1000;
+      while (nextTime < endTime) {
+        data.minCandles.push({time: nextTime, open: lastClose, high: lastClose, low: lastClose, close: lastClose});
+        data.minVolume.push({time: nextTime, value: 0});
+        nextTime += 60;
+      }
+    } else {
+      data.minCandles = [];
+      data.minVolume = [];
+    }
+
+    // Recompute VWAP
+    let cumPV = 0;
+    let cumV = 0;
+    data.vwap = [];
+    for (let i = 0; i < data.minCandles.length; i++) {
+      const c = data.minCandles[i];
+      const v = data.minVolume[i].value;
+      const typ = (c.high + c.low + c.close) / 3;
+      cumPV += typ * v;
+      cumV += v;
+      if (cumV > 0) {
+        data.vwap.push({time: c.time, value: cumPV / cumV});
+      } else if (data.vwap.length > 0) {
+        data.vwap.push({time: c.time, value: data.vwap[data.vwap.length - 1].value});
+      }
+    }
+
+    // Aggregate to timeframe using extended min data
+    const aggCandles = [];
+    const aggVolume = [];
+    for (let i = 0; i < data.minCandles.length; i += multMin) {
+      const end = Math.min(i + multMin, data.minCandles.length);
+      const group = data.minCandles.slice(i, end);
+      if (group.length === 0) break;
+      const o = group[0].open;
+      let h = group[0].high;
+      let l = group[0].low;
+      for (const g of group) {
+        if (g.high > h) h = g.high;
+        if (g.low < l) l = g.low;
+      }
+      const c = group[group.length - 1].close;
+      let v = 0;
+      for (let j = i; j < end; j++) {
+        v += data.minVolume[j].value;
+      }
+      aggCandles.push({time: group[0].time, open: o, high: h, low: l, close: c});
+      aggVolume.push({time: group[0].time, value: v});
+    }
+    data.candles = aggCandles;
+    data.volume = aggVolume;
+
+    // Recompute SMA-9
+    let sum = 0;
+    data.sma = [];
+    for (let i = 0; i < data.candles.length; i++) {
+      sum += data.candles[i].close;
+      if (i >= 9) {
+        sum -= data.candles[i - 9].close;
+      }
+      if (i >= 8) {
+        data.sma.push({time: data.candles[i].time, value: sum / 9});
+      }
+    }
 
     /* Cache */
     cachedCandles=data.candles;cachedVolume=data.volume;
@@ -263,8 +379,43 @@ async function load(e){
     candleSeries.setMarkers([]);
     chart.timeScale().fitContent();
 
-    await fetchPriorDayClose(ticker,date);
     await displayExtra(ticker, date);
+
+    if (csvData.length === 1 && csvData[0].ticker.toUpperCase() !== ticker.toUpperCase() && !isCsvUploaded) {
+      csvData = [];
+      table.setData([]);
+    }
+
+    if (csvData.length === 0 && !skipDefaultRow) {
+      if (cachedMinCandles.length === 0) {
+        // No candle data available, do not create default row or show chart
+        candleSeries.setData([]);
+        volumeSeries.setData([]);
+        vwapSeries.setData([]);
+        smaSeries.setData([]);
+        return;
+      }
+      const row = { ticker: ticker.toUpperCase(), time: '0930', signal: 'buy' };
+      NEW_COLUMNS.forEach(col => row[col] = '');
+      await calculateMetricsForRow(row);
+      csvData = [{__row: 0, ...row}];
+      const allFields = ['ticker', 'time', 'signal', ...NEW_COLUMNS];
+      const cols = allFields.map(h => ({
+        title: h.toUpperCase().replace(/_/g, ' '),
+        field: h,
+        editor: "input",
+        minWidth: 80,
+        headerSort: false,
+        headerTooltip: true
+      }));
+      cols.unshift({ title: "#", formatter: "rownum", hozAlign: "center", width: 40, frozen: true });
+      table.setColumns(cols);
+      table.setData(csvData).then(() => {
+        currentRow = 0;
+        updateTableView();
+        showSignalOnChart(csvData[currentRow]);
+      });
+    }
   }catch(err){
     console.error('[load] error',err);
     alert('Error: '+(err.response?.data||err));
@@ -273,29 +424,30 @@ async function load(e){
 
 /* ─── Fetch prior‑day close (handles holidays/weekends) ─── */
 async function fetchPriorDayClose(ticker,date){
-  if(priorDayCloses[ticker]) return;     // cached
+  const key = ticker.toUpperCase();          // *** NEW: normalise once ***
+  if(priorDayCloses[key]) return;     // cached
 
-  let attempts=0; let d=new Date(date); const maxAttempts=10;
-  while(attempts<maxAttempts){
-    d.setDate(d.getDate()-1);
-    while(d.getDay()===0||d.getDay()===6){d.setDate(d.getDate()-1);} // skip wknd
-    const priorDate=d.toISOString().split('T')[0];
-    console.debug('[priorDay] fetching',ticker,priorDate);
-    try{
-      const {data}=await axios.get('/api/candles',
-        {params:{ticker,timeframe:'1m',date:priorDate}});
-      if(data.candles&&data.candles.length>0){
-        const last=data.candles[data.candles.length-1];
-        priorDayCloses[ticker]=last.close;
-        console.debug('[priorDay] close',ticker,last.close);
-        // New: Cache prior day RTH volume
-        const priorVol = data.minVolume.reduce((sum,v)=>sum + v.value,0);
-        priorDayVolumes[ticker] = priorVol;
-        return;
-      }else{console.warn('[priorDay] no candles',priorDate);}
-    }catch(err){console.warn('[priorDay] error',priorDate,err);}
-    attempts++;
-  }
+  let d = new Date(date);
+  d.setDate(d.getDate() - 1);
+  const to_date = d.toISOString().split('T')[0];
+  d.setDate(d.getDate() - 30);
+  const from_date = d.toISOString().split('T')[0];
+  console.debug('[priorDay] fetching',key,from_date,to_date);
+  try{
+    const {data}=await axios.get('/api/candles',
+      {params:{ticker: key,timeframe:'1d',from:from_date,to:to_date}});
+    if(data.candles&&data.candles.length>0){
+      const last=data.candles[data.candles.length-1];
+      priorDayCloses[key]=last.close;
+      console.debug('[priorDay] close',key,last.close);
+      // New: Prior day volume (RTH cumulative)
+      const priorVol = data.volume[data.volume.length-1].value;
+      priorDayVolumes[key] = priorVol;
+      const prior_date = new Date(last.time * 1000).toISOString().split('T')[0];
+      priorDayDates[key] = prior_date;
+      return;
+    }else{console.warn('[priorDay] no candles',from_date,to_date);}
+  }catch(err){console.warn('[priorDay] error',err);}
   console.error('[priorDay] could not find close');
 }
 
@@ -409,7 +561,7 @@ async function fetchMarketCap(ticker) {
     return formatNumber(marketCap, true);
   } catch (err) {
     console.error('[marketCap] error for', ticker, err);
-    return '';
+    return 'na'; // Fallback 
   }
 }
 
@@ -421,7 +573,7 @@ async function fetchFloat(ticker) {
     return formatNumber(floatShares);
   } catch (err) {
     console.error('[float] error for', ticker, err);
-    return '';
+    return 'na'; // Fallback 
   }
 }
 
@@ -431,81 +583,66 @@ async function calculateMetricsForRow(row){
   const rowTime=row.time;
   if(!rowTime) return;
 
-  const h=parseInt(rowTime.slice(0,2));
-  const m=parseInt(rowTime.slice(2,4));
-  const targetMinutes=h*60+m;
+  const relevant = cachedMinCandles;
 
-  const formatter=new Intl.DateTimeFormat('en-US',{
-    timeZone:'America/New_York',hour:'numeric',minute:'numeric',hour12:false});
-  const relevant=cachedMinCandles.filter(c=>{
-    const p=formatter.formatToParts(new Date(c.time*1000));
-    const hour=parseInt(p.find(x=>x.type==='hour').value);
-    const minute=parseInt(p.find(x=>x.type==='minute').value);
-    return hour*60+minute<=targetMinutes;
-  });
-  if(!relevant.length) return;
+  if(relevant.length > 0) {
+    const openPrice=relevant[0].open;
+    const eodClose=relevant[relevant.length-1].close;
+    const highOfDay=Math.max(...relevant.map(c=>c.high));
+    const lowOfDay =Math.min(...relevant.map(c=>c.low));
 
-  const openPrice=relevant[0].open;
-  const eodClose=relevant[relevant.length-1].close;
-  const highOfDay=Math.max(...relevant.map(c=>c.high));
-  const lowOfDay =Math.min(...relevant.map(c=>c.low));
+    row.open_price = openPrice.toFixed(2);
+    row.close_price = eodClose.toFixed(2);
+    row.high_of_day = highOfDay.toFixed(2);
+    row.low_of_day = lowOfDay.toFixed(2);
 
-  if(!row.open_price)               row.open_price =openPrice.toFixed(2);
-  if(!row.close_price)              row.close_price=eodClose.toFixed(2);
-  if(!row.high_of_day)              row.high_of_day=highOfDay.toFixed(2);
-  if(!row.low_of_day)               row.low_of_day =lowOfDay.toFixed(2);
+    if(openPrice>0){
+      let gain = ((eodClose - openPrice) / openPrice * 100).toFixed(2);
+      if (row.signal.toLowerCase() === 'sell') {
+        gain = ((openPrice - eodClose) / openPrice * 100).toFixed(2);
+      }
+      row.percent_gain_eod = gain;
 
-  if(openPrice>0){
-    if(!row.percent_gain_eod)
-      row.percent_gain_eod=((eodClose-openPrice)/openPrice*100).toFixed(2);
-    if(!row.max_spiking_up_percent)
-      row.max_spiking_up_percent=((highOfDay-openPrice)/openPrice*100).toFixed(2);
-    if(!row.max_spiking_down_percent)
-      row.max_spiking_down_percent=((lowOfDay-openPrice)/openPrice*100).toFixed(2);
-  }
+      row.max_spiking_up_percent = ((highOfDay-openPrice)/openPrice*100).toFixed(2);
+      row.max_spiking_down_percent = ((openPrice - lowOfDay)/openPrice*100).toFixed(2);
+    }
 
-  if(!row.volume&&cachedMinVolume.length){
-    const totalVol=relevant.reduce((s, c, i)=>s + cachedMinVolume[i].value,0);
-    row.volume=Math.round(totalVol).toLocaleString();
-  }
+    if(cachedMinVolume.length){
+      const relevantVolume = cachedMinVolume;
+      const totalVol = relevantVolume.reduce((s, v) => s + v.value, 0);
+      row.volume = Math.round(totalVol).toLocaleString();
+    }
 
-  const ticker=row.ticker.toUpperCase();
-  if(!row.percent_gap_from_prior&&priorDayCloses[ticker]){
-    const prior=priorDayCloses[ticker];
-    row.percent_gap_from_prior=((openPrice-prior)/prior*100).toFixed(2);
-  }
+    const ticker=row.ticker.toUpperCase();
+    if(priorDayCloses[ticker]){
+      const prior=priorDayCloses[ticker];
+      row.percent_gap_from_prior = ((openPrice-prior)/prior*100).toFixed(2);
+    }
 
-  // New: Prior day volume (RTH cumulative)
-  if(!row.prior_day_volume && priorDayVolumes[ticker]){
-    row.prior_day_volume = Math.round(priorDayVolumes[ticker]).toLocaleString();
-  }
+    // New: Prior day volume (RTH cumulative)
+    if(priorDayVolumes[ticker]){
+      row.prior_day_volume = Math.round(priorDayVolumes[ticker]).toLocaleString();
+    }
 
-  // New: Pre-market volume (prior after + current pre)
-  if(!row.pre_market_volume){
-    const date = document.getElementById('date').value;
-    // Find priorDate (reuse logic from fetchPriorDayClose, but since already fetched, need priorDate
-    let d = new Date(date);
-    d.setDate(d.getDate() - 1);
-    while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() - 1);
-    const priorDate = d.toISOString().split('T')[0];
-
-    const preVol = await calculatePreMarketVolume(ticker, date, priorDate);
+    // New: Pre-market volume (prior after + current pre)
+    const priorDate = priorDayDates[ticker] || '';
+    let preVol = 0;
+    if(priorDate){
+      preVol = await calculatePreMarketVolume(ticker, date, priorDate);
+    }
     row.pre_market_volume = Math.round(preVol).toLocaleString();
-  }
 
-  // New: Market Cap from Polygon
-  if (!row.market_cap) {
+    // New: Market Cap from Polygon
     row.market_cap = await fetchMarketCap(ticker);
-  }
 
-  // New: Float from FMP
-  if (!row.float) {
+    // New: Float from FMP
     row.float = await fetchFloat(ticker);
   }
 }
 
 /* ─── CSV upload handler ─────────────────────────────────── */
 document.getElementById('csvFile').addEventListener('change',async e=>{
+  isCsvUploaded = true;
   const file=e.target.files[0]; if(!file) return;
   const text=await file.text();
   const p=Papa.parse(text.trim(),{header:true,skipEmptyLines:true});
@@ -566,13 +703,16 @@ document.getElementById('nextRow').onclick=()=>{
 
 /* ─── Show signal on chart ───────────────────────────────── */
 function combineDateAndTime(dateStr,HHMM){
-  const h=Number(HHMM.slice(0,2)),m=Number(HHMM.slice(2));
+  const h=parseInt(HHMM.slice(0,2)),m=parseInt(HHMM.slice(2,4));
   return new Date(`${dateStr}T${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:00-04:00`).getTime();
 }
 async function showSignalOnChart(row){
   console.debug('[show] row →',row);
-  document.getElementById('ticker').value=row.ticker.toUpperCase();
-  await load();                       // reload chart for this ticker/date
+  const currentTicker = document.getElementById('ticker').value.toUpperCase();
+  if (row.ticker.toUpperCase() !== currentTicker) {
+    document.getElementById('ticker').value = row.ticker.toUpperCase();
+    await load(null, true); // Load with skipDefaultRow = true to avoid recursion
+  }
 
   await calculateMetricsForRow(row);  // enrich row metrics (async)
   table.updateData([row]);            // show updates in grid
@@ -721,6 +861,20 @@ if (!listenersAdded) {
   });
   listenersAdded = true;
 }
+
+document.getElementById('toggleSignal').addEventListener('click', () => {
+  if (csvData.length === 0) return;
+  const row = csvData[currentRow];
+  row.signal = row.signal.toLowerCase() === 'buy' ? 'sell' : 'buy';
+  calculateMetricsForRow(row).then(() => {
+    table.updateData([row]);
+    showSignalOnChart(row);
+  });
+});
+
+window.addEventListener('resize', () => {
+  chart.resize(document.getElementById('chart').clientWidth, 600);
+});
 
 </script>
 </html>
