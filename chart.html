@@ -3,16 +3,13 @@
 <head>
   <meta charset="UTF-8"/>
   <title>Chart - {{TICKER}} {{DATE}} {{TIME}}</title>
-
   <!-- Bootstrap & Tabulator CSS -->
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/tabulator-tables@5.4.4/dist/css/tabulator.min.css" rel="stylesheet"/>
   <link href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css" rel="stylesheet">
-
   <style>
     body { margin:1rem; background:#121212; color:#e0e0e0 }
-    #signal-chart, #base-chart { height:600px; margin-bottom: 2rem; width: 100%; }
-
+    #signal-chart, #base-chart { height:600px; margin-bottom: 2rem; width: 100%; position: relative; }
     .signal-info {
       background: #1e1e1e;
       border: 1px solid #444;
@@ -20,14 +17,11 @@
       border-radius: 8px;
       margin-bottom: 1rem;
     }
-
     .signal-buy { color: #26a69a; font-weight: bold; }
     .signal-sell { color: #ef5350; font-weight: bold; }
-
     #signal-metrics-sheet, #base-sheet, #signal-news-sheet, #signal-filings-sheet, #base-news-sheet, #base-filings-sheet {
       margin-top:1rem; max-width:100%; overflow-x:auto;
     }
-
     .tabulator-header { background:#000000; }
     .tabulator-col { background:#000000; }
     .tabulator-col-title {
@@ -42,7 +36,6 @@
     .tabulator-cell { background:#2a2a2a; color:#ffffff; user-select:text; }
     .tabulator-row-even { background-color:#252525; }
     .tabulator-row-odd { background-color:#2a2a2a; }
-
     #signal-metrics-sheet .tabulator-header, #signal-news-sheet .tabulator-header, #signal-filings-sheet .tabulator-header,
     #base-sheet .tabulator-header, #base-news-sheet .tabulator-header, #base-filings-sheet .tabulator-header {
       background:#000000 !important;
@@ -51,7 +44,6 @@
     #base-sheet .tabulator-col, #base-news-sheet .tabulator-col, #base-filings-sheet .tabulator-col {
       background:#000000 !important;
     }
-
     .tabulator-tooltip {
       background:#000 !important;
       color:#fff !important;
@@ -61,7 +53,6 @@
       white-space: pre-line;
       word-break: break-all;
     }
-
     .tabulator-cell a {
       display: -webkit-box;
       -webkit-line-clamp: 3;
@@ -71,7 +62,6 @@
       white-space: normal;
       word-break: break-word;
     }
-
     .profile-container {
       background: #1e1e1e;
       border: 1px solid #444;
@@ -86,11 +76,9 @@
     .profile-container a { color: #4da6ff; text-decoration: underline; }
     .profile-container a:hover { color: #80bfff; }
     .profile-container img { max-width: 100px; margin-bottom: 1rem; border-radius: 4px; }
-
     .tabulator-row:hover .tabulator-cell { background-color: #3a3a3a !important; color: #ffffff !important; }
     .tabulator-col:hover { background-color: #111111 !important; }
     .tabulator-row:hover { background-color: #3a3a3a !important; }
-
     /* Base chart specific styles */
     #base-form .form-control, #base-form .form-select {
       background:#1e1e1e !important;
@@ -109,6 +97,16 @@
       border-radius: 5px;
       z-index: 1000;
     }
+    /* 09:30 vertical guide */
+    .rth-line {
+      position:absolute; top:0; bottom:0; width:0;
+      border-left:2px dashed #ffd700; pointer-events:none; opacity:0.9; z-index:2;
+    }
+    .rth-label {
+      position:absolute; top:0; transform: translateX(-50%);
+      font-size:12px; background:rgba(0,0,0,0.6);
+      padding:2px 4px; border-radius:3px; color:#ffd700; z-index:2;
+    }
   </style>
 </head>
 <body>
@@ -122,7 +120,6 @@
       <button class="nav-link" id="base-tab" data-bs-toggle="tab" data-bs-target="#base" type="button" role="tab" aria-controls="base" aria-selected="false">Base Chart</button>
     </li>
   </ul>
-
   <!-- Tab Content -->
   <div class="tab-content" id="chartTabContent">
     <!-- Signal Chart Tab -->
@@ -130,6 +127,7 @@
       <div class="signal-info">
         <h3>{{TICKER}} - {{DATE}} at {{TIME}}</h3>
         <p>Signal: <span class="signal-{{SIGNAL}}">{{SIGNAL}}</span> | Resolution: {{RESOLUTION}}</p>
+        <button class="btn btn-primary" onclick="postToPatternfolio()">Post to Patternfolio</button>
       </div>
       <div id="signal-chart" class="border rounded"></div>
       <h4>Metrics (as of {{TIME}})</h4>
@@ -146,7 +144,6 @@
       <div id="signal-filings-sheet"></div>
       <div id="signal-profile-container" class="profile-container"></div>
     </div>
-
     <!-- Base Chart Tab -->
     <div class="tab-pane fade" id="base" role="tabpanel" aria-labelledby="base-tab">
       <h3 class="mb-3">Candles + Volume (gray), VWAP (yellow) & SMA-9 (red)</h3>
@@ -193,7 +190,6 @@
     </div>
   </div>
 </div>
-
 <!-- Libraries -->
 <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
@@ -201,29 +197,26 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/tabulator-tables@5.4.4/dist/js/tabulator.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
-
 <script>
+const patternfolioURL = "{{PATTERNFOLIO_URL}}";
 // Signal Chart Logic
 let signalListenersAdded = false;
 let signalChart, signalCandleSeries, signalVolumeSeries, signalVwapSeries, signalSmaSeries;
-
 const nyTime = ts =>
   new Date(ts * 1000).toLocaleTimeString(
     'en-US',
     { timeZone: 'America/New_York', hour12: false, hour: '2-digit', minute: '2-digit' }
   );
+ 
 
-  
-  
 function initSignalChart() {
    signalChart = LightweightCharts.createChart(document.getElementById('signal-chart'),{
   layout:{background:{color:'#1e1e1e'},textColor:'#cccccc'},
   grid:{vertLines:{color:'#2e2e2e'},horzLines:{color:'#2e2e2e'}},
   timeScale:{timeVisible:true,secondsVisible:false},
-  localization:{ timeFormatter: nyTime }    // ★ cross‑hair label
+  localization:{ timeFormatter: nyTime } // ★ cross‑hair label
 });
-
-signalChart.timeScale().applyOptions({ tickMarkFormatter: nyTime }); // ★ axis ticks    
+signalChart.timeScale().applyOptions({ tickMarkFormatter: nyTime }); // ★ axis ticks
   signalCandleSeries = signalChart.addCandlestickSeries({
     upColor: '#26a69a', downColor: '#ef5350',
     wickUpColor: '#26a69a', wickDownColor: '#ef5350', borderVisible: false
@@ -243,13 +236,11 @@ const ticker = "{{TICKER}}";
 const timeStr = "{{TIME}}";
 const signal = "{{SIGNAL}}".toLowerCase();
 const timeframe = "{{RESOLUTION}}";
-
 const NEW_COLUMNS = [
   'market_cap', 'float', 'open_price', 'close_price', 'high_of_day', 'low_of_day',
   'percent_gain_eod', 'max_spiking_up_percent', 'max_spiking_down_percent',
   'volume', 'percent_gap_from_prior', 'prior_day_volume', 'pre_market_volume'
 ];
-
 function truncatedTooltip(cell) {
   const el = cell.getElement();
   const textEl = el.querySelector('a') || el;
@@ -258,7 +249,6 @@ function truncatedTooltip(cell) {
   }
   return false;
 }
-
 async function fetchExtendedData(ticker, date) {
   console.debug('[extended] fetching for', ticker, date);
   try {
@@ -271,26 +261,17 @@ async function fetchExtendedData(ticker, date) {
     return [];
   }
 }
-
 async function calculatePreMarketVolume(ticker, currentDate, priorDate) {
   const priorExtVol = await fetchExtendedData(ticker, priorDate);
-  const priorAfterHours = priorExtVol.filter(v => {
-    const ts = new Date(v.time * 1000);
-    const hour = ts.getHours();
-    return hour >= 16 && hour < 20;
-  }).reduce((sum, v) => sum + v.value, 0);
-
+  const priorAfterHours = priorExtVol
+    .filter(v => { const [hour] = nyHourMinute(v.time * 1000); return hour >= 16 && hour < 20; })
+    .reduce((sum, v) => sum + v.value, 0);
   const currExtVol = await fetchExtendedData(ticker, currentDate);
-  const currPreMarket = currExtVol.filter(v => {
-    const ts = new Date(v.time * 1000);
-    const hour = ts.getHours();
-    const min = ts.getMinutes();
-    return (hour >= 4 && hour < 9) || (hour === 9 && min < 30);
-  }).reduce((sum, v) => sum + v.value, 0);
-
+  const currPreMarket = currExtVol
+    .filter(v => { const [hour, min] = nyHourMinute(v.time * 1000); return (hour >= 4 && hour < 9) || (hour === 9 && min < 30); })
+    .reduce((sum, v) => sum + v.value, 0);
   return priorAfterHours + currPreMarket;
 }
-
 function formatNumber(num, isMarketCap = false) {
   if (num < 1000) return (isMarketCap ? '$' : '') + num.toFixed(1);
   if (num < 1000000) return (isMarketCap ? '$' : '') + (num / 1000).toFixed(1) + ' K';
@@ -299,7 +280,6 @@ function formatNumber(num, isMarketCap = false) {
   if (num < 100000000000) return (isMarketCap ? '$' : '') + (num / 1000000000).toFixed(1) + ' B';
   return (isMarketCap ? '$' : '') + (num / 1000000000).toLocaleString('en-US', { maximumFractionDigits: 1 }) + ' B';
 }
-
 async function fetchMarketCap(ticker) {
   try {
     const { data } = await axios.get('/api/ticker-details', { params: { ticker } });
@@ -310,7 +290,6 @@ async function fetchMarketCap(ticker) {
     return '';
   }
 }
-
 async function fetchFloat(ticker) {
   try {
     const { data } = await axios.get('/api/share-float', { params: { ticker } });
@@ -321,7 +300,6 @@ async function fetchFloat(ticker) {
     return '';
   }
 }
-
 async function loadSignalChart() {
   try {
     initSignalChart();
@@ -330,27 +308,28 @@ async function loadSignalChart() {
     signalVolumeSeries.setData(data.volume);
     signalVwapSeries.setData(data.vwap);
     signalSmaSeries.setData(data.sma);
-
-    const ts = combineDateAndTime(date, timeStr) / 1000;
+    const hhmm = String(timeStr).replace(':','').padStart(4,'0');
+    const ts = combineDateAndTime(date, hhmm) / 1000;
     const isBuy = signal === "buy";
-    signalCandleSeries.setMarkers([{
-      time: ts,
-      position: isBuy ? "belowBar" : "aboveBar",
-      shape: isBuy ? "arrowUp" : "arrowDown",
-      color: isBuy ? "#00ff00" : "#ff3333",
-      size: 2
-    }]);
+    if (hhmm === '0930') {
+      signalCandleSeries.setMarkers([]);
+    } else {
+      signalCandleSeries.setMarkers([{
+        time: ts,
+        position: isBuy ? "belowBar" : "aboveBar",
+        shape: isBuy ? "arrowUp" : "arrowDown",
+        color: isBuy ? "#00ff00" : "#ff3333",
+        size: 2
+      }]);
+    }
     signalChart.timeScale().fitContent();
-
+    drawRthOpenLine(signalChart, document.getElementById('signal-chart'), date);
     const metrics = data.metrics;
-
     let d = new Date(date);
     d.setDate(d.getDate() - 1);
     while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() - 1);
     const priorDate = d.toISOString().split('T')[0];
-
     const preVol = await calculatePreMarketVolume(ticker, date, priorDate);
-
     const row = {
       ticker,
       time: timeStr,
@@ -369,7 +348,6 @@ async function loadSignalChart() {
       prior_day_volume: parseFloat(metrics.prior_day_volume || '0').toLocaleString(),
       pre_market_volume: Math.round(preVol).toLocaleString(),
     };
-
     new Tabulator("#signal-metrics-sheet", {
       data: [row],
       layout: "fitColumns",
@@ -401,7 +379,6 @@ async function loadSignalChart() {
         { title: "PRE MARKET VOLUME", field: "pre_market_volume", minWidth: 80, headerSort: false, headerTooltip: true },
       ],
     });
-
     const newsItems = data.news || [];
     new Tabulator("#signal-news-sheet", {
       data: newsItems,
@@ -421,7 +398,6 @@ async function loadSignalChart() {
         { title: "SOURCE", field: "source", minWidth: 150, headerSort: false, headerTooltip: true, vertAlign: "top" },
       ],
     });
-
     const filingsItems = data.filings || [];
     new Tabulator("#signal-filings-sheet", {
       data: filingsItems,
@@ -442,7 +418,6 @@ async function loadSignalChart() {
         { title: "COMPANY", field: "companyName", minWidth: 200, headerSort: false, headerTooltip: true, vertAlign: "top" },
       ],
     });
-
     if (!signalListenersAdded) {
       document.getElementById('signal-copy-news').addEventListener('click', () => {
         const jsonData = {
@@ -461,7 +436,6 @@ async function loadSignalChart() {
           alert('Failed to copy to clipboard.');
         });
       });
-
       document.getElementById('signal-copy-filings').addEventListener('click', () => {
         const jsonData = {
           ticker: ticker,
@@ -482,7 +456,6 @@ async function loadSignalChart() {
       });
       signalListenersAdded = true;
     }
-
     const profile = data.profile || {};
     if (Object.keys(profile).length > 0) {
       const profileDiv = document.getElementById('signal-profile-container');
@@ -504,7 +477,6 @@ async function loadSignalChart() {
         <p><strong>Is ETF:</strong> ${profile.isEtf ? 'Yes' : 'No'}</p>
       `;
     }
-
     // Resize chart after data is loaded
     signalChart.resize(document.getElementById('signal-chart').clientWidth, 600);
   } catch (err) {
@@ -513,8 +485,9 @@ async function loadSignalChart() {
 }
 
 function combineDateAndTime(dateStr, HHMM) {
-  const h = Number(HHMM.slice(0, 2)), m = Number(HHMM.slice(2));
-  return new Date(`${dateStr}T${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00`).getTime();
+  const s = String(HHMM).replace(':','').padStart(4,'0');
+  const h = Number(s.slice(0, 2)), m = Number(s.slice(2,4));
+  return getNyTime(dateStr, h, m).getTime();
 }
 
 // Base Chart Logic
@@ -530,11 +503,10 @@ function initBaseChart() {
   layout:{background:{color:'#1e1e1e'},textColor:'#cccccc'},
   grid:{vertLines:{color:'#2e2e2e'},horzLines:{color:'#2e2e2e'}},
   timeScale:{timeVisible:true,secondsVisible:false},
-  localization:{ timeFormatter: nyTime }    // ★ cross‑hair label
+  localization:{ timeFormatter: nyTime } // ★ cross‑hair label
 });
-
 baseChart.timeScale().applyOptions({ tickMarkFormatter: nyTime }); // ★ axis ticks
-    
+   
   baseCandleSeries = baseChart.addCandlestickSeries({
     upColor: '#26a69a', downColor: '#ef5350',
     wickUpColor: '#26a69a', wickDownColor: '#ef5350', borderVisible: false
@@ -562,8 +534,65 @@ const nyTimeFormatter = new Intl.DateTimeFormat('en-US', {
   hour12: false
 });
 
+const NY_TZ = 'America/New_York';
+function tzOffsetFor(epochMillis, timeZone = NY_TZ) {
+  const dtf = new Intl.DateTimeFormat('en-US', {
+    timeZone, hour12: false,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+  });
+  const parts = dtf.formatToParts(new Date(epochMillis));
+  const map = {};
+  for (const p of parts) map[p.type] = p.value;
+  const asUTC = Date.UTC(+map.year, +map.month - 1, +map.day, +map.hour, +map.minute, +map.second);
+  return (asUTC - epochMillis) / 60000;
+}
 function getNyTime(dateStr, h, m) {
-  return new Date(dateStr + 'T' + h.toString().padStart(2, '0') + ':' + m.toString().padStart(2, '0') + ':00-04:00');
+  const [Y, M, D] = dateStr.split('-').map(Number);
+  const utcGuess = Date.UTC(Y, M - 1, D, h, m, 0);
+  const off1 = tzOffsetFor(utcGuess, NY_TZ);
+  let epoch = utcGuess - off1 * 60000;
+  const off2 = tzOffsetFor(epoch, NY_TZ);
+  if (off2 !== off1) epoch = utcGuess - off2 * 60000;
+  return new Date(epoch);
+}
+const nyHMFormatter = new Intl.DateTimeFormat('en-US', {
+  timeZone: NY_TZ, hour12: false, hour: '2-digit', minute: '2-digit'
+});
+function nyHourMinute(epochMillis) {
+  const parts = nyHMFormatter.formatToParts(new Date(epochMillis));
+  let hh = 0, mm = 0;
+  for (const p of parts) {
+    if (p.type === 'hour') hh = Number(p.value);
+    else if (p.type === 'minute') mm = Number(p.value);
+  }
+  return [hh, mm];
+}
+
+function drawRthOpenLine(chart, containerEl, dateStr) {
+  let line = containerEl.querySelector('.rth-line');
+  let label = containerEl.querySelector('.rth-label');
+  if (!line) {
+    line = document.createElement('div'); line.className = 'rth-line';
+    label = document.createElement('div'); label.className = 'rth-label'; label.textContent = '09:30';
+    containerEl.appendChild(line); containerEl.appendChild(label);
+  }
+  chart.__rthTarget = getNyTime(dateStr, 9, 30).getTime() / 1000;
+  if (!chart.__rthHandler) {
+    chart.__rthHandler = () => {
+      const x = chart.timeScale().timeToCoordinate(chart.__rthTarget);
+      if (x == null) {
+        line.style.display = 'none'; label.style.display = 'none'; return;
+      }
+      line.style.display = 'block'; label.style.display = 'block';
+      const px = Math.round(x);
+      line.style.left = px + 'px';
+      label.style.left = px + 'px';
+    };
+    chart.timeScale().subscribeVisibleTimeRangeChange(chart.__rthHandler);
+    window.addEventListener('resize', chart.__rthHandler);
+  }
+  chart.__rthHandler();
 }
 
 async function fetchBasePriorDayClose(ticker, date) {
@@ -599,11 +628,9 @@ async function loadBaseChart(e, skipDefaultRow = false) {
   const baseTicker = ticker;
   const baseTimeframe = timeframe;
   const baseDate = date;
-
   document.getElementById('base-ticker').value = baseTicker;
   document.getElementById('base-timeframe').value = baseTimeframe;
   document.getElementById('base-date').value = baseDate;
-
   console.debug('[baseLoad] requesting', { ticker: baseTicker, timeframe: baseTimeframe, date: baseDate });
   if (!baseTicker || !baseTimeframe || !baseDate) {
     alert('Fill all fields');
@@ -617,10 +644,9 @@ async function loadBaseChart(e, skipDefaultRow = false) {
     console.debug('[baseLoad] received', data.candles.length, 'bars');
     if (!data.candles.length) {
       console.warn('[baseLoad] no candles', baseTicker, baseDate, baseTimeframe);
+      alert('No RTH data for this date; try the prior trading day.');
     }
-
     await fetchBasePriorDayClose(baseTicker, baseDate);
-
     let multMin;
     switch (baseTimeframe) {
       case '1m': multMin = 1; break;
@@ -633,7 +659,6 @@ async function loadBaseChart(e, skipDefaultRow = false) {
       case '1h': multMin = 60; break;
       default: multMin = 1;
     }
-
     if (data.minCandles.length > 0) {
       let lastTime = data.minCandles[data.minCandles.length - 1].time;
       let lastClose = data.minCandles[data.minCandles.length - 1].close;
@@ -648,7 +673,6 @@ async function loadBaseChart(e, skipDefaultRow = false) {
       data.minCandles = [];
       data.minVolume = [];
     }
-
     let cumPV = 0, cumV = 0;
     data.vwap = [];
     for (let i = 0; i < data.minCandles.length; i++) {
@@ -663,7 +687,6 @@ async function loadBaseChart(e, skipDefaultRow = false) {
         data.vwap.push({ time: c.time, value: data.vwap[data.vwap.length - 1].value });
       }
     }
-
     const aggCandles = [], aggVolume = [];
     for (let i = 0; i < data.minCandles.length; i += multMin) {
       const end = Math.min(i + multMin, data.minCandles.length);
@@ -685,7 +708,6 @@ async function loadBaseChart(e, skipDefaultRow = false) {
     }
     data.candles = aggCandles;
     data.volume = aggVolume;
-
     let sum = 0;
     data.sma = [];
     for (let i = 0; i < data.candles.length; i++) {
@@ -693,26 +715,22 @@ async function loadBaseChart(e, skipDefaultRow = false) {
       if (i >= 9) sum -= data.candles[i - 9].close;
       if (i >= 8) data.sma.push({ time: data.candles[i].time, value: sum / 9 });
     }
-
     baseCachedCandles = data.candles;
     baseCachedVolume = data.volume;
     baseCachedMinCandles = data.minCandles;
     baseCachedMinVolume = data.minVolume;
-
     baseCandleSeries.setData(data.candles);
     baseVolumeSeries.setData(data.volume);
     baseVwapSeries.setData(data.vwap);
     baseSmaSeries.setData(data.sma);
     baseCandleSeries.setMarkers([]);
     baseChart.timeScale().fitContent();
-
+    drawRthOpenLine(baseChart, document.getElementById('base-chart'), baseDate);
     await displayBaseExtra(baseTicker, baseDate);
-
     if (baseCsvData.length === 1 && baseCsvData[0].ticker.toUpperCase() !== baseTicker.toUpperCase() && !baseIsCsvUploaded) {
       baseCsvData = [];
       baseTable.setData([]);
     }
-
     if (baseCsvData.length === 0 && !skipDefaultRow) {
       if (baseCachedMinCandles.length === 0) {
         baseCandleSeries.setData([]);
@@ -742,7 +760,6 @@ async function loadBaseChart(e, skipDefaultRow = false) {
         showBaseSignalOnChart(baseCsvData[baseCurrentRow]);
       });
     }
-
     // Resize chart after data is loaded
     baseChart.resize(document.getElementById('base-chart').clientWidth, 600);
   } catch (err) {
@@ -770,26 +787,23 @@ function setupBaseTable() {
     },
   });
 }
+
 setupBaseTable();
 
 async function calculateBaseMetricsForRow(row) {
   if (!baseCachedMinCandles.length) return;
   const rowTime = row.time;
   if (!rowTime) return;
-
   const relevant = baseCachedMinCandles;
-
   if (relevant.length > 0) {
     const openPrice = relevant[0].open;
     const eodClose = relevant[relevant.length - 1].close;
     const highOfDay = Math.max(...relevant.map(c => c.high));
     const lowOfDay = Math.min(...relevant.map(c => c.low));
-
     row.open_price = openPrice.toFixed(2);
     row.close_price = eodClose.toFixed(2);
     row.high_of_day = highOfDay.toFixed(2);
     row.low_of_day = lowOfDay.toFixed(2);
-
     if (openPrice > 0) {
       let gain = ((eodClose - openPrice) / openPrice * 100).toFixed(2);
       if (row.signal.toLowerCase() === 'sell') {
@@ -799,30 +813,25 @@ async function calculateBaseMetricsForRow(row) {
       row.max_spiking_up_percent = ((highOfDay - openPrice) / openPrice * 100).toFixed(2);
       row.max_spiking_down_percent = ((openPrice - lowOfDay) / openPrice * 100).toFixed(2);
     }
-
     if (baseCachedMinVolume.length) {
       const relevantVolume = baseCachedMinVolume;
       const totalVol = relevantVolume.reduce((s, v) => s + v.value, 0);
       row.volume = Math.round(totalVol).toLocaleString();
     }
-
     const ticker = row.ticker.toUpperCase();
     if (basePriorDayCloses[ticker]) {
       const prior = basePriorDayCloses[ticker];
       row.percent_gap_from_prior = ((openPrice - prior) / prior * 100).toFixed(2);
     }
-
     if (basePriorDayVolumes[ticker]) {
       row.prior_day_volume = Math.round(basePriorDayVolumes[ticker]).toLocaleString();
     }
-
     const priorDate = basePriorDayDates[ticker] || '';
     let preVol = 0;
     if (priorDate) {
       preVol = await calculatePreMarketVolume(ticker, date, priorDate);
     }
     row.pre_market_volume = Math.round(preVol).toLocaleString();
-
     row.market_cap = await fetchMarketCap(ticker);
     row.float = await fetchFloat(ticker);
   }
@@ -831,7 +840,6 @@ async function calculateBaseMetricsForRow(row) {
 async function displayBaseExtra(ticker, date) {
   try {
     const { data } = await axios.get('/api/extra', { params: { ticker, date, days: 2 } });
-
     baseCurrentNews = data.news || [];
     new Tabulator("#base-news-sheet", {
       data: baseCurrentNews,
@@ -851,7 +859,6 @@ async function displayBaseExtra(ticker, date) {
         { title: "SOURCE", field: "source", minWidth: 150, headerSort: false, headerTooltip: true, vertAlign: "top" },
       ],
     });
-
     baseCurrentFilings = data.filings || [];
     new Tabulator("#base-filings-sheet", {
       data: baseCurrentFilings,
@@ -872,12 +879,11 @@ async function displayBaseExtra(ticker, date) {
         { title: "COMPANY", field: "companyName", minWidth: 200, headerSort: false, headerTooltip: true, vertAlign: "top" },
       ],
     });
-
-    const profile = data.profile || [];
+    const profile = data.profile || null;
     const profileContainer = document.getElementById('base-profile-container');
     profileContainer.innerHTML = '';
-    if (profile.length > 0) {
-      const prof = profile[0];
+    const prof = Array.isArray(profile) ? profile[0] : profile;
+    if (prof && Object.keys(prof).length) {
       profileContainer.innerHTML = `
         <h4>Company Profile (Easy Digest for Day Traders)</h4>
         <img src="${prof.image || ''}" alt="${prof.companyName || 'Company Logo'}">
@@ -918,19 +924,22 @@ async function showBaseSignalOnChart(row) {
     document.getElementById('base-ticker').value = row.ticker.toUpperCase();
     await loadBaseChart(null, true);
   }
-
   await calculateBaseMetricsForRow(row);
   baseTable.updateData([row]);
-
-  const ts = combineDateAndTime(date, row.time);
+  const hhmm = String(row.time).replace(':','').padStart(4,'0');
+  const ts = combineDateAndTime(date, hhmm);
   const isBuy = row.signal.toLowerCase() === "buy";
-  baseCandleSeries.setMarkers([{
-    time: ts / 1000,
-    position: isBuy ? "belowBar" : "aboveBar",
-    shape: isBuy ? "arrowUp" : "arrowDown",
-    color: isBuy ? "#00ff00" : "#ff3333",
-    size: 2
-  }]);
+  if (hhmm === '0930') {
+    baseCandleSeries.setMarkers([]);
+  } else {
+    baseCandleSeries.setMarkers([{
+      time: ts / 1000,
+      position: isBuy ? "belowBar" : "aboveBar",
+      shape: isBuy ? "arrowUp" : "arrowDown",
+      color: isBuy ? "#00ff00" : "#ff3333",
+      size: 2
+    }]);
+  }
 }
 
 document.getElementById('base-form').addEventListener('submit', loadBaseChart);
@@ -945,11 +954,9 @@ document.getElementById('base-csvFile').addEventListener('change', async e => {
     alert("CSV seems empty");
     return;
   }
-
   baseCsvData.forEach(row => {
     NEW_COLUMNS.forEach(col => { if (!(col in row)) row[col] = ""; });
   });
-
   const allFields = [...new Set([...p.meta.fields, ...NEW_COLUMNS])];
   const cols = allFields.map(h => ({
     title: h.toUpperCase().replace(/_/g, ' '),
@@ -960,7 +967,6 @@ document.getElementById('base-csvFile').addEventListener('change', async e => {
     headerTooltip: true
   }));
   cols.unshift({ title: "#", formatter: "rownum", hozAlign: "center", width: 40, frozen: true });
-
   baseTable.setColumns(cols);
   baseTable.setData(baseCsvData).then(() => {
     baseCurrentRow = 0;
@@ -970,7 +976,6 @@ document.getElementById('base-csvFile').addEventListener('change', async e => {
     showBaseSignalOnChart(baseCsvData[baseCurrentRow]);
   });
 });
-
 document.getElementById('base-addColumn').onclick = () => {
   const name = document.getElementById('base-newColumn').value.trim();
   if (!name) return;
@@ -978,7 +983,6 @@ document.getElementById('base-addColumn').onclick = () => {
   baseTable.addColumn({ title: name, field: name, editor: "input", headerTooltip: true });
   document.getElementById('base-newColumn').value = "";
 };
-
 document.getElementById('base-prevRow').onclick = () => {
   if (baseCurrentRow > 0) {
     baseCurrentRow--;
@@ -987,7 +991,6 @@ document.getElementById('base-prevRow').onclick = () => {
     showBaseSignalOnChart(baseCsvData[baseCurrentRow]);
   }
 };
-
 document.getElementById('base-nextRow').onclick = () => {
   if (baseCurrentRow < baseCsvData.length - 1) {
     baseCurrentRow++;
@@ -996,7 +999,6 @@ document.getElementById('base-nextRow').onclick = () => {
     showBaseSignalOnChart(baseCsvData[baseCurrentRow]);
   }
 };
-
 document.getElementById('base-downloadCsv').onclick = () => {
   if (!baseCsvData.length) return;
   const out = baseCsvData.map(({ __row, ...r }) => r);
@@ -1006,7 +1008,6 @@ document.getElementById('base-downloadCsv').onclick = () => {
   a.download = "signals_edited.csv";
   a.click();
 };
-
 document.getElementById('base-toggleSignal').addEventListener('click', () => {
   if (baseCsvData.length === 0) return;
   const row = baseCsvData[baseCurrentRow];
@@ -1016,7 +1017,6 @@ document.getElementById('base-toggleSignal').addEventListener('click', () => {
     showBaseSignalOnChart(row);
   });
 });
-
 if (!baseListenersAdded) {
   document.getElementById('base-copy-news').addEventListener('click', () => {
     if (baseCurrentNews.length === 0) {
@@ -1039,7 +1039,6 @@ if (!baseListenersAdded) {
       alert('Failed to copy to clipboard.');
     });
   });
-
   document.getElementById('base-copy-filings').addEventListener('click', () => {
     if (baseCurrentFilings.length === 0) {
       alert('No filings data available.');
@@ -1071,7 +1070,6 @@ document.getElementById('signal-tab').addEventListener('shown.bs.tab', () => {
     signalChart.resize(document.getElementById('signal-chart').clientWidth, 600);
   }
 });
-
 document.getElementById('base-tab').addEventListener('shown.bs.tab', () => {
   if (!baseChart) {
     initBaseChart();
@@ -1081,5 +1079,21 @@ document.getElementById('base-tab').addEventListener('shown.bs.tab', () => {
 
 // Initialize Signal Chart
 loadSignalChart();
+
+async function postToPatternfolio() {
+  const note = prompt('Optional note:') || '';
+  try {
+    await axios.post(patternfolioURL + '/api/incoming', {
+      ticker: "{{TICKER}}",
+      date: "{{DATE}}",
+      signalTime: "{{TIME}}",
+      note: note
+    });
+    alert('Chart posted to Patternfolio!');
+  } catch (err) {
+    alert('Error posting: ' + (err.response?.data || err.message));
+  }
+}
 </script>
+</body>
 </html>
