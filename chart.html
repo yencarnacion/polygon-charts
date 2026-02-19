@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8"/>
-  <title>Chart - {{TICKER}} {{DATE}} {{TIME}}</title>
+  <title>Chart - {{TICKER}} {{DATE}} {{TIME_DISPLAY}}</title>
   <!-- Bootstrap & Tabulator CSS -->
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/tabulator-tables@5.4.4/dist/css/tabulator.min.css" rel="stylesheet"/>
@@ -125,12 +125,12 @@
     <!-- Signal Chart Tab -->
     <div class="tab-pane fade show active" id="signal" role="tabpanel" aria-labelledby="signal-tab">
       <div class="signal-info">
-        <h3>{{TICKER}} - {{DATE}} at {{TIME}}</h3>
-        <p>Signal: <span class="signal-{{SIGNAL}}">{{SIGNAL}}</span> | Resolution: {{RESOLUTION}}</p>
+        <h3>{{TICKER}} - {{DATE}} at {{TIME_DISPLAY}}</h3>
+        <p>Signal: <span class="signal-{{SIGNAL}}">{{SIGNAL_LABEL}}</span> | Resolution: {{RESOLUTION}} | Company: <span id="signal-company-name">Loading...</span></p>
         <button class="btn btn-primary" onclick="postToPatternfolio()">Post to Patternfolio</button>
       </div>
       <div id="signal-chart" class="border rounded"></div>
-      <h4>Metrics (as of {{TIME}})</h4>
+      <h4>Metrics (as of {{TIME_DISPLAY}})</h4>
       <div id="signal-metrics-sheet"></div>
       <div class="d-flex justify-content-between align-items-center mb-2">
         <h4 class="mb-0">News Headlines for the Day</h4>
@@ -234,7 +234,8 @@ signalChart.timeScale().applyOptions({ tickMarkFormatter: nyTime }); // ★ axis
 const date = "{{DATE}}";
 const ticker = "{{TICKER}}";
 const timeStr = "{{TIME}}";
-const signal = "{{SIGNAL}}".toLowerCase();
+const hasSignalTime = timeStr !== "";
+const signal = "{{SIGNAL}}".toLowerCase() === "sell" ? "sell" : "buy";
 const timeframe = "{{RESOLUTION}}";
 const NEW_COLUMNS = [
   'market_cap', 'float', 'open_price', 'close_price', 'high_of_day', 'low_of_day',
@@ -303,24 +304,37 @@ async function fetchFloat(ticker) {
 async function loadSignalChart() {
   try {
     initSignalChart();
-    const { data } = await axios.get('/api/chart-data', { params: { ticker, timeframe, date, time: timeStr } });
+    const requestParams = { ticker, resolution: timeframe, date };
+    if (hasSignalTime) {
+      requestParams.time = timeStr;
+    }
+    const { data } = await axios.get('/api/chart-data', { params: requestParams });
+    const profile = data.profile || {};
+    const companyNameEl = document.getElementById('signal-company-name');
+    if (companyNameEl) {
+      companyNameEl.textContent = profile.companyName || profile.name || 'N/A';
+    }
     signalCandleSeries.setData(data.candles);
     signalVolumeSeries.setData(data.volume);
     signalVwapSeries.setData(data.vwap);
     signalSmaSeries.setData(data.sma);
-    const hhmm = String(timeStr).replace(':','').padStart(4,'0');
-    const ts = combineDateAndTime(date, hhmm) / 1000;
-    const isBuy = signal === "buy";
-    if (hhmm === '0930') {
-      signalCandleSeries.setMarkers([]);
+    if (hasSignalTime) {
+      const hhmm = String(timeStr).replace(':','').padStart(4,'0');
+      const ts = combineDateAndTime(date, hhmm) / 1000;
+      const isBuy = signal === "buy";
+      if (hhmm === '0930') {
+        signalCandleSeries.setMarkers([]);
+      } else {
+        signalCandleSeries.setMarkers([{
+          time: ts,
+          position: isBuy ? "belowBar" : "aboveBar",
+          shape: isBuy ? "arrowUp" : "arrowDown",
+          color: isBuy ? "#00ff00" : "#ff3333",
+          size: 2
+        }]);
+      }
     } else {
-      signalCandleSeries.setMarkers([{
-        time: ts,
-        position: isBuy ? "belowBar" : "aboveBar",
-        shape: isBuy ? "arrowUp" : "arrowDown",
-        color: isBuy ? "#00ff00" : "#ff3333",
-        size: 2
-      }]);
+      signalCandleSeries.setMarkers([]);
     }
     signalChart.timeScale().fitContent();
     drawRthOpenLine(signalChart, document.getElementById('signal-chart'), date);
@@ -332,7 +346,7 @@ async function loadSignalChart() {
     const preVol = await calculatePreMarketVolume(ticker, date, priorDate);
     const row = {
       ticker,
-      time: timeStr,
+      time: hasSignalTime ? timeStr : "N/A",
       signal: signal.toUpperCase(),
       market_cap: await fetchMarketCap(ticker),
       'float': await fetchFloat(ticker),
@@ -456,7 +470,6 @@ async function loadSignalChart() {
       });
       signalListenersAdded = true;
     }
-    const profile = data.profile || {};
     if (Object.keys(profile).length > 0) {
       const profileDiv = document.getElementById('signal-profile-container');
       profileDiv.innerHTML = `
@@ -480,6 +493,10 @@ async function loadSignalChart() {
     // Resize chart after data is loaded
     signalChart.resize(document.getElementById('signal-chart').clientWidth, 600);
   } catch (err) {
+    const companyNameEl = document.getElementById('signal-company-name');
+    if (companyNameEl) {
+      companyNameEl.textContent = 'N/A';
+    }
     console.error('[loadSignalChart] error', err);
   }
 }

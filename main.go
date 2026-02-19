@@ -3,13 +3,14 @@
 package main
 
 import (
-	_ "embed"
 	"bytes"
+	_ "embed"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"sort"
@@ -26,11 +27,11 @@ var (
 )
 
 var (
-	polygonAPIKey    string
-	fmpAPIKey        string
-	secAPIKey        string
-	patternfolioURL  string
-	listenPort       int
+	polygonAPIKey   string
+	fmpAPIKey       string
+	secAPIKey       string
+	patternfolioURL string
+	listenPort      int
 )
 
 //go:embed index.html
@@ -48,7 +49,9 @@ type polygonBar struct {
 	V float64 `json:"v"`
 }
 
-type polygonResp struct{ Results []polygonBar `json:"results"` }
+type polygonResp struct {
+	Results []polygonBar `json:"results"`
+}
 
 type candlePoint struct {
 	Time  int64   `json:"time"`
@@ -264,6 +267,110 @@ func rootHandler(w http.ResponseWriter, _ *http.Request) {
 	fmt.Fprint(w, html)
 }
 
+func validISODate(dateStr string) bool {
+	_, err := time.Parse("2006-01-02", dateStr)
+	return err == nil
+}
+
+func normalizeHHMM(timeStr string) (string, error) {
+	s := strings.TrimSpace(timeStr)
+	if s == "" {
+		return "", nil
+	}
+	s = strings.ReplaceAll(s, ":", "")
+	if len(s) != 4 {
+		return "", fmt.Errorf("time must be in HHMM or HH:MM format")
+	}
+	h, err := strconv.Atoi(s[:2])
+	if err != nil {
+		return "", fmt.Errorf("time must be in HHMM or HH:MM format")
+	}
+	m, err := strconv.Atoi(s[2:])
+	if err != nil {
+		return "", fmt.Errorf("time must be in HHMM or HH:MM format")
+	}
+	if h < 0 || h > 23 || m < 0 || m > 59 {
+		return "", fmt.Errorf("time must be a valid 24-hour value")
+	}
+	return s, nil
+}
+
+func validResolution(tf string) bool {
+	switch tf {
+	case "1m", "2m", "3m", "5m", "10m", "15m", "30m", "1h":
+		return true
+	default:
+		return false
+	}
+}
+
+func openChartHandler(w http.ResponseWriter, r *http.Request) {
+	path := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/open-chart"), "/")
+	q := r.URL.Query()
+
+	var ticker, dateStr, timeStr string
+	if path != "" {
+		parts := strings.Split(path, "/")
+		if len(parts) < 2 || len(parts) > 3 {
+			http.Error(w, "path must be /api/open-chart/{ticker}/{date}[/time]", http.StatusBadRequest)
+			return
+		}
+		ticker = parts[0]
+		dateStr = parts[1]
+		if len(parts) == 3 {
+			timeStr = parts[2]
+		}
+	} else {
+		ticker = q.Get("ticker")
+		dateStr = q.Get("date")
+		timeStr = q.Get("time")
+	}
+
+	ticker = strings.ToUpper(strings.TrimSpace(ticker))
+	dateStr = strings.TrimSpace(dateStr)
+	if ticker == "" || dateStr == "" {
+		http.Error(w, "ticker and date are required", http.StatusBadRequest)
+		return
+	}
+	if !validISODate(dateStr) {
+		http.Error(w, "date must be YYYY-MM-DD", http.StatusBadRequest)
+		return
+	}
+	normTime, err := normalizeHHMM(timeStr)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	resolution := strings.ToLower(strings.TrimSpace(q.Get("resolution")))
+	if resolution == "" {
+		resolution = "1m"
+	}
+	if !validResolution(resolution) {
+		http.Error(w, "unsupported resolution", http.StatusBadRequest)
+		return
+	}
+
+	signal := strings.ToLower(strings.TrimSpace(q.Get("signal")))
+	if signal == "" {
+		signal = "buy"
+	}
+	if signal != "buy" && signal != "sell" {
+		http.Error(w, "signal must be buy or sell", http.StatusBadRequest)
+		return
+	}
+
+	params := url.Values{}
+	params.Set("ticker", ticker)
+	params.Set("date", dateStr)
+	params.Set("resolution", resolution)
+	params.Set("signal", signal)
+	if normTime != "" {
+		params.Set("time", normTime)
+	}
+	http.Redirect(w, r, "/chart?"+params.Encode(), http.StatusFound)
+}
+
 func candlesHandler(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	symbol := strings.ToUpper(q.Get("ticker"))
@@ -276,11 +383,11 @@ func candlesHandler(w http.ResponseWriter, r *http.Request) {
 	if from == "" {
 		from = q.Get("date")
 	}
-    isValid := func(s string) bool { _, err := time.Parse("2006-01-02", s); return err == nil }
-    if from == "" || to == "" || !isValid(from) || !isValid(to) {
-        http.Error(w, "from/to/date must be YYYY-MM-DD", http.StatusBadRequest)
-        return
-    }
+	isValid := func(s string) bool { _, err := time.Parse("2006-01-02", s); return err == nil }
+	if from == "" || to == "" || !isValid(from) || !isValid(to) {
+		http.Error(w, "from/to/date must be YYYY-MM-DD", http.StatusBadRequest)
+		return
+	}
 	extended := q.Get("extended") == "true"
 	if symbol == "" || tf == "" {
 		http.Error(w, "ticker, timeframe required", 400)
@@ -319,12 +426,12 @@ func candlesHandler(w http.ResponseWriter, r *http.Request) {
 	loc, _ := time.LoadLocation("America/New_York")
 	candles := make([]candlePoint, 0, len(bars))
 	vol := make([]linePoint, 0, len(bars))
-    for _, b := range bars {
-        ts := time.UnixMilli(b.T).In(loc)
-        h := ts.Hour()
-        if !extended && span == "minute" && (h < 7 || h >= 16) {
-            continue
-        }
+	for _, b := range bars {
+		ts := time.UnixMilli(b.T).In(loc)
+		h := ts.Hour()
+		if !extended && span == "minute" && (h < 7 || h >= 16) {
+			continue
+		}
 		candles = append(candles, candlePoint{
 			Time:  b.T / 1000,
 			Open:  b.O,
@@ -348,12 +455,12 @@ func candlesHandler(w http.ResponseWriter, r *http.Request) {
 	vwap := make([]linePoint, 0)
 	if span != "day" {
 		var cumPV, cumV float64
-        for _, b := range minBars {
-            ts := time.UnixMilli(b.T).In(loc)
-            h := ts.Hour()
-            if !extended && (h < 7 || h >= 16) {
-                continue
-            }
+		for _, b := range minBars {
+			ts := time.UnixMilli(b.T).In(loc)
+			h := ts.Hour()
+			if !extended && (h < 7 || h >= 16) {
+				continue
+			}
 			typ := (b.H + b.L + b.C) / 3
 			cumPV += typ * b.V
 			cumV += b.V
@@ -661,23 +768,48 @@ func getPriorTradingDate(ticker, dateStr string) (string, error) {
 
 func chartHandler(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	date := q.Get("date")
-	ticker := strings.ToUpper(q.Get("ticker"))
-	timeStr := q.Get("time")
-	signal := q.Get("signal")
-	resolution := q.Get("resolution")
-	if date == "" || ticker == "" || timeStr == "" || signal == "" {
-		http.Error(w, "date, ticker, time, and signal are required", 400)
+	date := strings.TrimSpace(q.Get("date"))
+	ticker := strings.ToUpper(strings.TrimSpace(q.Get("ticker")))
+	timeStr, err := normalizeHHMM(q.Get("time"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	signal := strings.ToLower(strings.TrimSpace(q.Get("signal")))
+	if signal == "" {
+		signal = "buy"
+	}
+	if signal != "buy" && signal != "sell" {
+		http.Error(w, "signal must be buy or sell", http.StatusBadRequest)
+		return
+	}
+	resolution := strings.ToLower(strings.TrimSpace(q.Get("resolution")))
+	if date == "" || ticker == "" {
+		http.Error(w, "date and ticker are required", http.StatusBadRequest)
+		return
+	}
+	if !validISODate(date) {
+		http.Error(w, "date must be YYYY-MM-DD", http.StatusBadRequest)
 		return
 	}
 	if resolution == "" {
 		resolution = "1m"
 	}
+	if !validResolution(resolution) {
+		http.Error(w, "unsupported resolution", http.StatusBadRequest)
+		return
+	}
+	timeDisplay := timeStr
+	if timeDisplay == "" {
+		timeDisplay = "FULL DAY"
+	}
 	w.Header().Set("Content-Type", "text/html")
 	html := strings.ReplaceAll(chartHTML, "{{DATE}}", date)
 	html = strings.ReplaceAll(html, "{{TICKER}}", ticker)
 	html = strings.ReplaceAll(html, "{{TIME}}", timeStr)
+	html = strings.ReplaceAll(html, "{{TIME_DISPLAY}}", timeDisplay)
 	html = strings.ReplaceAll(html, "{{SIGNAL}}", signal)
+	html = strings.ReplaceAll(html, "{{SIGNAL_LABEL}}", strings.ToUpper(signal))
 	html = strings.ReplaceAll(html, "{{RESOLUTION}}", resolution)
 	html = strings.ReplaceAll(html, "{{PATTERNFOLIO_URL}}", patternfolioURL)
 	fmt.Fprint(w, html)
@@ -685,23 +817,34 @@ func chartHandler(w http.ResponseWriter, r *http.Request) {
 
 func chartDataHandler(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	symbol := strings.ToUpper(q.Get("ticker"))
-	dateStr := q.Get("date")
-	timeStr := q.Get("time")
+	symbol := strings.ToUpper(strings.TrimSpace(q.Get("ticker")))
+	dateStr := strings.TrimSpace(q.Get("date"))
+	timeStr, err := normalizeHHMM(q.Get("time"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 	tf := strings.ToLower(strings.TrimSpace(q.Get("resolution")))
-	if symbol == "" || dateStr == "" || timeStr == "" {
-		http.Error(w, "ticker, date, and time required", 400)
+	if symbol == "" || dateStr == "" {
+		http.Error(w, "ticker and date required", http.StatusBadRequest)
+		return
+	}
+	if !validISODate(dateStr) {
+		http.Error(w, "date must be YYYY-MM-DD", http.StatusBadRequest)
 		return
 	}
 	if tf == "" {
 		tf = "1m"
 	}
-	if len(timeStr) != 4 {
-		http.Error(w, "time must be in HHMM format", 400)
+	if !validResolution(tf) {
+		http.Error(w, "unsupported timeframe", http.StatusBadRequest)
 		return
 	}
-	targetHour, _ := strconv.Atoi(timeStr[:2])
-	targetMinute, _ := strconv.Atoi(timeStr[2:])
+	targetHour, targetMinute := 16, 0
+	if timeStr != "" {
+		targetHour, _ = strconv.Atoi(timeStr[:2])
+		targetMinute, _ = strconv.Atoi(timeStr[2:])
+	}
 	minBars, err := queryPolygon(symbol, 1, "minute", dateStr, dateStr)
 	if err != nil {
 		http.Error(w, err.Error(), 502)
@@ -712,10 +855,10 @@ func chartDataHandler(w http.ResponseWriter, r *http.Request) {
 	var lastTime int64
 	extendedCandles := make([]candlePoint, 0)
 	extendedVolume := make([]linePoint, 0)
-    for _, b := range minBars {
+	for _, b := range minBars {
 		ts := time.UnixMilli(b.T).In(loc)
 		h, m := ts.Hour(), ts.Minute()
-        if h < 7 || h >= 16 {
+		if h < 7 || h >= 16 {
 			continue
 		}
 		if h > targetHour || (h == targetHour && m > targetMinute) {
@@ -735,25 +878,25 @@ func chartDataHandler(w http.ResponseWriter, r *http.Request) {
 		lastClose = b.C
 		lastTime = b.T
 	}
-    if len(extendedCandles) > 0 && targetHour < 16 {
-        extendTime := time.UnixMilli(lastTime).In(loc).Add(time.Minute)
-        for extendTime.Hour() < 16 {
-            if extendTime.Hour() >= 7 {
-                extendedCandles = append(extendedCandles, candlePoint{
-                    Time:  extendTime.Unix(),
-                    Open:  lastClose,
-                    High:  lastClose,
-                    Low:   lastClose,
-                    Close: lastClose,
-                })
-                extendedVolume = append(extendedVolume, linePoint{
-                    Time:  extendTime.Unix(),
-                    Value: 0,
-                })
-            }
-            extendTime = extendTime.Add(time.Minute)
-        }
-    }
+	if len(extendedCandles) > 0 && targetHour < 16 {
+		extendTime := time.UnixMilli(lastTime).In(loc).Add(time.Minute)
+		for extendTime.Hour() < 16 {
+			if extendTime.Hour() >= 7 {
+				extendedCandles = append(extendedCandles, candlePoint{
+					Time:  extendTime.Unix(),
+					Open:  lastClose,
+					High:  lastClose,
+					Low:   lastClose,
+					Close: lastClose,
+				})
+				extendedVolume = append(extendedVolume, linePoint{
+					Time:  extendTime.Unix(),
+					Value: 0,
+				})
+			}
+			extendTime = extendTime.Add(time.Minute)
+		}
+	}
 	var candles []candlePoint
 	var vol []linePoint
 	if tf == "1m" {
@@ -1018,16 +1161,16 @@ func chartDataHandler(w http.ResponseWriter, r *http.Request) {
 		profileData = profile[0]
 	}
 	out := map[string]interface{}{
-		"candles":   candles,
-		"volume":    vol,
+		"candles":    candles,
+		"volume":     vol,
 		"minCandles": extendedCandles,
-		"minVolume": extendedVolume,
-		"vwap":      vwap,
-		"sma":       sma,
-		"metrics":   metrics,
-		"news":      uniqueNews,
-		"filings":   allFilings,
-		"profile":   profileData,
+		"minVolume":  extendedVolume,
+		"vwap":       vwap,
+		"sma":        sma,
+		"metrics":    metrics,
+		"news":       uniqueNews,
+		"filings":    allFilings,
+		"profile":    profileData,
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(out)
@@ -1144,6 +1287,8 @@ func main() {
 	http.HandleFunc("/api/share-float", shareFloatHandler)
 	http.HandleFunc("/api/extra", extraHandler)
 	http.HandleFunc("/chart", chartHandler)
+	http.HandleFunc("/api/open-chart", openChartHandler)
+	http.HandleFunc("/api/open-chart/", openChartHandler)
 	http.HandleFunc("/api/chart-data", chartDataHandler)
 	addr := fmt.Sprintf(":%d", listenPort)
 	go func() {
