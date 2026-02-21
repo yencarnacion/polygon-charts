@@ -6,84 +6,121 @@
   <!-- Bootstrap & Flatpickr -->
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&display=swap" rel="stylesheet">
   <!-- Tabulator CSS -->
   <link href="https://cdn.jsdelivr.net/npm/tabulator-tables@5.4.4/dist/css/tabulator.min.css" rel="stylesheet"/>
   <style>
-    body { margin:1rem; background:#121212; color:#e0e0e0 }
-    #chart { width: 100%; height:600px; box-sizing: border-box; position: relative; }
+    :root {
+      --bg: #0b1220;
+      --bg-bloom: rgba(39, 84, 141, 0.35);
+      --surface: #121d2d;
+      --surface-2: #1a273a;
+      --surface-3: #22324a;
+      --border: #314663;
+      --text: #e9f1fb;
+      --muted: #a8b9ce;
+      --accent: #4fa7ff;
+      --accent-strong: #2b7dcb;
+      --positive: #21c58f;
+      --negative: #ff8a5a;
+      --warning: #ffd166;
+      --neutral: #8ca0bc;
+    }
+    body {
+      margin: 1rem;
+      color: var(--text);
+      font-family: "Atkinson Hyperlegible", "Segoe UI", sans-serif;
+      background:
+        radial-gradient(circle at 5% 8%, var(--bg-bloom), transparent 34%),
+        radial-gradient(circle at 88% 0%, rgba(31, 60, 105, 0.3), transparent 30%),
+        var(--bg);
+    }
+    h3, h4, h5, p, label, strong { color: var(--text); }
+    #chart {
+      width: 100%;
+      height: 600px;
+      box-sizing: border-box;
+      position: relative;
+      border-color: var(--border) !important;
+      background: var(--surface);
+    }
     .form-control, .form-select {
-      background:#1e1e1e!important;
-      color:#e0e0e0!important;
-      border:1px solid #444!important;
+      background: var(--surface) !important;
+      color: var(--text) !important;
+      border: 1px solid var(--border) !important;
     }
-    /* ─── Grid / Sheet Styling ─────────────────────────────── */
-    #sheet, #news-sheet, #filings-sheet { margin-top:1rem; max-width:100%; overflow-x:auto; }
-    /* Header container */
-    #sheet .tabulator-header, #news-sheet .tabulator-header, #filings-sheet .tabulator-header {
-      background:#000000; /* solid black header bar */
+    .form-control::placeholder { color: var(--muted) !important; }
+    .btn-primary {
+      background-color: var(--accent);
+      border-color: var(--accent);
+      color: #081421;
+      font-weight: 700;
     }
-    /* Individual header cells */
-    #sheet .tabulator-col, #news-sheet .tabulator-col, #filings-sheet .tabulator-col {
-      background:#000000; /* ensure every header cell is black */
+    .btn-primary:hover { background-color: var(--accent-strong); border-color: var(--accent-strong); color: #f5f9ff; }
+    .btn-secondary {
+      background: #2a3950;
+      border-color: #2a3950;
+      color: var(--text);
     }
-    /* Header title text */
-    #sheet .tabulator-col-title, #news-sheet .tabulator-col-title, #filings-sheet .tabulator-col-title {
-      color:#ffffff!important; /* bold white text */
-      font-weight:bold;
-      overflow:hidden; /* keep a single‑line ellipsis */
-      text-overflow:ellipsis;
-      white-space:nowrap;
-      user-select:text;
+    .btn-outline-light { color: var(--text); border-color: var(--border); }
+    .btn-outline-light:hover { background: var(--surface-2); border-color: var(--accent); color: var(--text); }
+    #sheet, #news-sheet, #filings-sheet, #market-radar-leaders, #market-radar-intraday {
+      margin-top: 1rem;
+      max-width: 100%;
+      overflow-x: auto;
     }
-    #sheet .tabulator-tableholder, #news-sheet .tabulator-tableholder, #filings-sheet .tabulator-tableholder{
-      background:#1e1e1e;
-      color:#e0e0e0;
+    .tabulator-header,
+    .tabulator-col {
+      background: var(--surface-3) !important;
+      border-color: var(--border) !important;
     }
-    #sheet .tabulator-cell, #news-sheet .tabulator-cell, #filings-sheet .tabulator-cell{
-      background:#2a2a2a;
-      color:#ffffff;
-      user-select:text;
+    .tabulator-col-title {
+      color: var(--text) !important;
+      font-weight: 700;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      user-select: text;
     }
-    /* ── Sheet header text ── */
-    #sheet .tabulator-col-title{
-      color:#ffffff !important; /* black TICKER, TIME, SIGNAL… */
+    .tabulator-tableholder {
+      background: var(--surface);
+      color: var(--text);
     }
-    /* ── Sheet body cell text ── */
-    #sheet .tabulator-cell{
-      color:#ffffff !important;
+    .tabulator-cell {
+      background: var(--surface-2);
+      color: var(--text);
+      border-color: var(--border) !important;
+      user-select: text;
     }
-    #sheet .tabulator-row-even, #news-sheet .tabulator-row-even, #filings-sheet .tabulator-row-even {background-color:#252525;}
-    #sheet .tabulator-row-odd, #news-sheet .tabulator-row-odd, #filings-sheet .tabulator-row-odd {background-color:#2a2a2a;}
-    /* --- Tabulator header tooltip (hover popup) --- */
-    .tabulator-tooltip{
-      background:#000 !important; /* black background */
-      color:#fff !important; /* bold white text */
-      font-weight:bold; /* make text bold */
+    .tabulator-row-even { background-color: #1a2739; }
+    .tabulator-row-odd { background-color: #1c2a3d; }
+    .tabulator-tooltip {
+      background: #0a111c !important;
+      color: #f3f8ff !important;
       z-index: 9999;
       max-width: 600px;
       white-space: pre-line;
-      word-break: break-all;
+      word-break: break-word;
     }
-    /* --- Editing input styling for readability --- */
     .tabulator-editing input,
     .tabulator-editing textarea,
     .tabulator-editing select {
-      background-color: #ffffff !important; /* White background for edit mode */
-      color: #000000 !important; /* Black text for readability */
-      border: 1px solid #cccccc !important; /* Light border */
+      background-color: #ffffff !important;
+      color: #061322 !important;
+      border: 1px solid #9eb3cc !important;
     }
-    /* ─── Row Indicator Styling ────────────────────────────── */
     #row-indicator {
       position: absolute;
-      top: 100px; /* Adjust based on your header height; above the chart */
+      top: 100px;
       right: 20px;
-      color: #ffffff;
-      font-weight: bold;
-      font-size: 18px;
-      background-color: rgba(0, 0, 0, 0.7); /* Semi-transparent black for visibility */
+      color: var(--text);
+      font-weight: 700;
+      font-size: 16px;
+      background-color: rgba(7, 14, 24, 0.82);
+      border: 1px solid var(--border);
       padding: 5px 10px;
-      border-radius: 5px;
-      z-index: 1000; /* Ensure it's on top */
+      border-radius: 6px;
+      z-index: 1000;
     }
     .tabulator-cell a {
       display: -webkit-box;
@@ -93,65 +130,97 @@
       text-overflow: ellipsis;
       white-space: normal;
       word-break: break-word;
+      color: #7ec1ff;
     }
     .profile-container {
-      background: #1e1e1e;
-      border: 1px solid #444;
+      background: var(--surface);
+      border: 1px solid var(--border);
       padding: 1rem;
       border-radius: 8px;
       margin-top: 2rem;
     }
-    .profile-container h4 {
-      color: #ffffff;
-      margin-bottom: 1rem;
-    }
-    .profile-container h5 {
-      color: #ffffff;
-      margin-bottom: 1rem;
-    }
-    .profile-container p {
-      margin-bottom: 0.5rem;
-    }
-    .profile-container p strong {
-      color: #cccccc;
-    }
+    .profile-container h4 { margin-bottom: 1rem; }
+    .profile-container h5 { margin-bottom: 1rem; }
+    .profile-container p { margin-bottom: 0.5rem; }
+    .profile-container p strong { color: var(--muted); }
     .profile-container a {
-      color: #4da6ff;
+      color: #84c6ff;
       text-decoration: underline;
     }
     .profile-container a:hover {
-      color: #80bfff;
+      color: #b4dbff;
     }
     .profile-container img {
       max-width: 100px;
       margin-bottom: 1rem;
       border-radius: 4px;
     }
-    /* Improved hover for readability */
     .tabulator-row:hover .tabulator-cell {
-      background-color: #3a3a3a !important;
-      color: #ffffff !important;
+      background-color: #253955 !important;
+      color: #f5f9ff !important;
     }
-    .tabulator-col:hover {
-      background-color: #111111 !important;
+    .tabulator-col:hover { background-color: #2a3b55 !important; }
+    .tabulator-row:hover { background-color: #253955 !important; }
+    .market-radar {
+      margin-top: 1rem;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 0.9rem;
     }
-    .tabulator-row:hover {
-      background-color: #3a3a3a !important;
+    .radar-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 0.75rem;
+      margin-top: 0.75rem;
     }
-    /* 09:30 vertical guide */
+    .radar-card {
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-left: 4px solid var(--accent);
+      border-radius: 8px;
+      padding: 0.55rem 0.7rem;
+      min-height: 86px;
+    }
+    .radar-card .label {
+      color: var(--muted);
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+    .radar-card .value {
+      color: var(--text);
+      font-size: 1.35rem;
+      font-weight: 700;
+      line-height: 1.05;
+      margin-top: 0.3rem;
+    }
+    .radar-card .sub {
+      color: var(--muted);
+      font-size: 0.8rem;
+      margin-top: 0.2rem;
+    }
+    .radar-card.pos { border-left-color: var(--positive); }
+    .radar-card.neg { border-left-color: var(--negative); }
+    .radar-card.warn { border-left-color: var(--warning); }
+    .radar-card.neu { border-left-color: var(--neutral); }
+    .radar-updated { color: var(--muted); font-size: 0.82rem; }
+    .chip-long { color: var(--positive); }
+    .chip-short { color: var(--negative); }
+    .chip-neutral { color: var(--neutral); }
     .rth-line {
       position:absolute; top:0; bottom:0; width:0;
-      border-left:2px dashed #ffd700; pointer-events:none; opacity:0.9; z-index:2;
+      border-left:2px dashed var(--warning); pointer-events:none; opacity:0.9; z-index:2;
     }
     .rth-label {
       position:absolute; top:0; transform: translateX(-50%);
-      font-size:12px; background:rgba(0,0,0,0.6);
-      padding:2px 4px; border-radius:3px; color:#ffd700; z-index:2;
+      font-size:12px; background:rgba(7,14,24,0.7);
+      padding:2px 4px; border-radius:3px; color:var(--warning); z-index:2;
     }
   </style>
 </head>
 <body>
-<h3 class="mb-3">Candles + Volume (gray), VWAP (yellow) & SMA-9 (red)</h3>
+<h3 class="mb-3">Candles + Volume (slate), VWAP (yellow) & SMA-9 (blue)</h3>
 <form id="form" class="row gy-2 gx-2 align-items-center">
   <div class="col-auto"><input id="ticker" class="form-control" value="SPY" placeholder="Ticker"></div>
   <div class="col-auto">
@@ -178,6 +247,15 @@
 <div id="row-indicator"></div>
 <!-- Chart above the sheet -->
 <div id="chart" class="border mt-4 rounded"></div>
+<section class="market-radar">
+  <div class="d-flex justify-content-between align-items-center gap-2 flex-wrap">
+    <h4 class="mb-0">Catalyst Radar (Marketaux)</h4>
+    <div id="market-radar-updated" class="radar-updated"></div>
+  </div>
+  <div id="market-radar-cards" class="radar-grid"></div>
+  <div id="market-radar-leaders"></div>
+  <div id="market-radar-intraday"></div>
+</section>
 <!-- Editable grid below -->
 <div id="sheet"></div>
 <div class="d-flex justify-content-between align-items-center mb-2">
@@ -204,6 +282,8 @@ let currentNews = [];
 let currentFilings = [];
 let listenersAdded = false;
 let isCsvUploaded = false; // Flag to track if CSV was uploaded
+let marketLeadersTable = null;
+let marketIntradayTable = null;
 
 const nyTime = ts =>
   new Date(ts * 1000).toLocaleTimeString(
@@ -289,25 +369,187 @@ function drawRthOpenLine(chart, containerEl, dateStr) {
   chart.__rthHandler();
 }
 
+function formatSentiment(value) {
+  const num = Number(value || 0);
+  if (!Number.isFinite(num)) return "0.00";
+  return `${num >= 0 ? "+" : ""}${num.toFixed(2)}`;
+}
+
+function sentimentBucket(value) {
+  const num = Number(value || 0);
+  if (num >= 0.15) return "pos";
+  if (num <= -0.15) return "neg";
+  return "neu";
+}
+
+function pulseBucket(value) {
+  const num = Number(value || 0);
+  if (num >= 70) return "warn";
+  if (num >= 40) return "pos";
+  return "neu";
+}
+
+function etClock(ts) {
+  const date = new Date(ts);
+  if (Number.isNaN(date.getTime())) return ts || "";
+  return date.toLocaleTimeString("en-US", {
+    timeZone: "America/New_York",
+    hour12: false,
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+}
+
+function renderMarketRadarUnavailable(message) {
+  document.getElementById("market-radar-updated").textContent = message;
+  document.getElementById("market-radar-cards").innerHTML = "";
+  if (marketLeadersTable) {
+    marketLeadersTable.setData([]);
+  }
+  if (marketIntradayTable) {
+    marketIntradayTable.setData([]);
+  }
+}
+
+function renderMarketRadar(data) {
+  const radar = data?.radar || {};
+  const pulse = Number(radar.pulse_score || 0);
+  const sent15 = Number(radar.sentiment_15m || 0);
+  const sent60 = Number(radar.sentiment_60m || 0);
+  const shift = Number(radar.sentiment_shift || 0);
+  const docs15 = Number(radar.documents_last_15m || 0);
+  const docs60 = Number(radar.documents_last_60m || 0);
+  const trendScore = Number(radar.trend_score || 0);
+  const bias = String(radar.bias || "NEUTRAL").toUpperCase();
+  const biasClass = bias === "LONG" ? "chip-long" : (bias === "SHORT" ? "chip-short" : "chip-neutral");
+
+  const cards = [
+    { label: "Pulse Score", value: pulse.toFixed(0), sub: "0-100 urgency", cls: pulseBucket(pulse) },
+    { label: "Bias", value: `<span class="${biasClass}">${bias}</span>`, sub: radar.bias_reason || "", cls: bias === "NEUTRAL" ? "neu" : (bias === "LONG" ? "pos" : "neg") },
+    { label: "Mentions 15m", value: docs15.toLocaleString(), sub: `60m: ${docs60.toLocaleString()}`, cls: docs15 >= 8 ? "warn" : "neu" },
+    { label: "Sentiment 15m", value: formatSentiment(sent15), sub: `60m: ${formatSentiment(sent60)}`, cls: sentimentBucket(sent15) },
+    { label: "Sentiment Shift", value: formatSentiment(shift), sub: "15m vs 60m", cls: sentimentBucket(shift) },
+    { label: "Trend Score", value: trendScore.toFixed(1), sub: "Marketaux trend", cls: trendScore >= 70 ? "warn" : "neu" }
+  ];
+  document.getElementById("market-radar-cards").innerHTML = cards.map(card => `
+    <div class="radar-card ${card.cls}">
+      <div class="label">${card.label}</div>
+      <div class="value">${card.value}</div>
+      <div class="sub">${card.sub}</div>
+    </div>
+  `).join("");
+
+  const updatedAt = data?.published_at ? `Updated ${new Date(data.published_at).toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit" })}` : "";
+  const warningText = (data?.warnings || []).length ? ` | ${data.warnings[0]}` : "";
+  document.getElementById("market-radar-updated").textContent = `${updatedAt}${warningText}`;
+
+  const leaders = (data?.leaders || []).map(item => ({
+    symbol: item.symbol || "",
+    total_documents: Number(item.total_documents || 0),
+    sentiment_avg: Number(item.sentiment_avg || 0),
+    score: Number(item.score || 0),
+    why: item.why || ""
+  }));
+  if (!marketLeadersTable) {
+    marketLeadersTable = new Tabulator("#market-radar-leaders", {
+      data: leaders,
+      layout: "fitColumns",
+      headerWordWrap: true,
+      tooltipsHeader: true,
+      tooltips: truncatedTooltip,
+      rowClick: (_, row) => {
+        const sym = row.getData().symbol;
+        if (!sym) return;
+        document.getElementById("ticker").value = sym;
+        load();
+      },
+      columns: [
+        { title: "MOVERS", field: "symbol", minWidth: 90, headerSort: false, headerTooltip: true },
+        { title: "DOCS", field: "total_documents", minWidth: 80, headerSort: false, headerTooltip: true },
+        {
+          title: "SENT", field: "sentiment_avg", minWidth: 80, headerSort: false, headerTooltip: true,
+          formatter: cell => {
+            const val = Number(cell.getValue() || 0);
+            const cls = sentimentBucket(val) === "pos" ? "chip-long" : (sentimentBucket(val) === "neg" ? "chip-short" : "chip-neutral");
+            return `<span class="${cls}">${formatSentiment(val)}</span>`;
+          }
+        },
+        { title: "TREND", field: "score", minWidth: 80, headerSort: false, headerTooltip: true, formatter: cell => Number(cell.getValue() || 0).toFixed(1) },
+        { title: "WHY MOVING", field: "why", minWidth: 320, headerSort: false, headerTooltip: true }
+      ]
+    });
+  } else {
+    marketLeadersTable.setData(leaders);
+  }
+
+  const rawBuckets = (data?.intraday || []).map(item => ({
+    date: item.date,
+    total_documents: Number(item.total_documents || 0),
+    sentiment_avg: Number(item.sentiment_avg || 0)
+  })).sort((a, b) => new Date(a.date) - new Date(b.date));
+  const intraday = rawBuckets.map((item, idx) => {
+    const prev = idx > 0 ? rawBuckets[idx - 1] : null;
+    return {
+      time: etClock(item.date),
+      total_documents: item.total_documents,
+      sentiment_avg: item.sentiment_avg,
+      sentiment_delta: prev ? (item.sentiment_avg - prev.sentiment_avg) : 0
+    };
+  }).slice(-24).reverse();
+  if (!marketIntradayTable) {
+    marketIntradayTable = new Tabulator("#market-radar-intraday", {
+      data: intraday,
+      layout: "fitColumns",
+      headerWordWrap: true,
+      tooltipsHeader: true,
+      tooltips: truncatedTooltip,
+      columns: [
+        { title: "LAST MINUTES (ET)", field: "time", minWidth: 120, headerSort: false, headerTooltip: true },
+        { title: "DOCS", field: "total_documents", minWidth: 80, headerSort: false, headerTooltip: true },
+        {
+          title: "SENT", field: "sentiment_avg", minWidth: 80, headerSort: false, headerTooltip: true,
+          formatter: cell => formatSentiment(cell.getValue())
+        },
+        {
+          title: "SHIFT", field: "sentiment_delta", minWidth: 80, headerSort: false, headerTooltip: true,
+          formatter: cell => formatSentiment(cell.getValue())
+        }
+      ]
+    });
+  } else {
+    marketIntradayTable.setData(intraday);
+  }
+}
+
+async function displayMarketRadar(ticker, date) {
+  try {
+    const { data } = await axios.get("/api/market-stats", { params: { ticker, date } });
+    renderMarketRadar(data);
+  } catch (err) {
+    console.warn("[marketRadar] unavailable", err?.response?.data || err.message);
+    renderMarketRadarUnavailable("Market Stats unavailable");
+  }
+}
+
 /* ─── Chart setup ─────────────────────────────────────────── */
 const chart = LightweightCharts.createChart(document.getElementById('chart'),{
-  layout:{background:{color:'#1e1e1e'},textColor:'#cccccc'},
-  grid:{vertLines:{color:'#2e2e2e'},horzLines:{color:'#2e2e2e'}},
+  layout:{background:{color:'#121d2d'},textColor:'#d7e4f4'},
+  grid:{vertLines:{color:'#2b3a52'},horzLines:{color:'#2b3a52'}},
   timeScale:{timeVisible:true,secondsVisible:false},
   localization:{ timeFormatter: nyTime } // ★ cross‑hair label
 });
 chart.timeScale().applyOptions({ tickMarkFormatter: nyTime }); // ★ axis ticks
 
 const candleSeries = chart.addCandlestickSeries({
-  upColor:'#26a69a',downColor:'#ef5350',
-  wickUpColor:'#26a69a',wickDownColor:'#ef5350',borderVisible:false});
+  upColor:'#21c58f',downColor:'#ff8a5a',
+  wickUpColor:'#21c58f',wickDownColor:'#ff8a5a',borderVisible:false});
 const volumeSeries = chart.addHistogramSeries({
-  color:'#888',priceFormat:{type:'volume'},
+  color:'#67819f',priceFormat:{type:'volume'},
   priceScaleId:'vol',scaleMargins:{top:0.75,bottom:0}});
 chart.priceScale('right').applyOptions({scaleMargins:{top:0.05,bottom:0.35}});
 chart.priceScale('vol').applyOptions({scaleMargins:{top:0.75,bottom:0}});
-const vwapSeries = chart.addLineSeries({color:'#ffd700',lineWidth:2});
-const smaSeries = chart.addLineSeries({color:'#ff4444',lineWidth:2});
+const vwapSeries = chart.addLineSeries({color:'#ffd166',lineWidth:2});
+const smaSeries = chart.addLineSeries({color:'#5fb3ff',lineWidth:2});
 
 /* ─── Global data storage ────────────────────────────────── */
 let cachedCandles = [];
@@ -424,7 +666,10 @@ async function load(e, skipDefaultRow = false){
     candleSeries.setMarkers([]);
     chart.timeScale().fitContent();
     drawRthOpenLine(chart, document.getElementById('chart'), date);
-    await displayExtra(ticker, date);
+    await Promise.all([
+      displayExtra(ticker, date),
+      displayMarketRadar(ticker, date)
+    ]);
     if (csvData.length === 1 && csvData[0].ticker.toUpperCase() !== ticker.toUpperCase() && !isCsvUploaded) {
       csvData = [];
       table.setData([]);
@@ -745,11 +990,11 @@ async function showSignalOnChart(row){
   if (hhmm === '0930') {
     candleSeries.setMarkers([]);
   } else {
-    candleSeries.setMarkers([{
+      candleSeries.setMarkers([{
       time:ts/1000,
       position:isBuy?"belowBar":"aboveBar",
       shape:isBuy?"arrowUp":"arrowDown",
-      color:isBuy?"#00ff00":"#ff3333",
+      color:isBuy?"#21c58f":"#ff8a5a",
       size:2
     }]);
   }

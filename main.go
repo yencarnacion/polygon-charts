@@ -8,7 +8,9 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -16,6 +18,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -30,6 +33,7 @@ var (
 	polygonAPIKey   string
 	fmpAPIKey       string
 	secAPIKey       string
+	marketauxAPIKey string
 	patternfolioURL string
 	listenPort      int
 )
@@ -91,6 +95,331 @@ type NewsItem struct {
 	Source    string `json:"source"`
 	URL       string `json:"url"`
 	Published string `json:"published"`
+}
+
+type marketauxEntityStat struct {
+	Date           string  `json:"date,omitempty"`
+	Symbol         string  `json:"symbol,omitempty"`
+	Name           string  `json:"name,omitempty"`
+	Country        string  `json:"country,omitempty"`
+	Exchange       string  `json:"exchange,omitempty"`
+	Industry       string  `json:"industry,omitempty"`
+	TotalDocuments int     `json:"total_documents"`
+	SentimentAvg   float64 `json:"sentiment_avg"`
+	Score          float64 `json:"score"`
+}
+
+func marketauxDateTimeUTC(t time.Time) string {
+	// Marketaux expects UTC datetime strings like YYYY-MM-DDTHH:MM (without timezone suffix).
+	return t.UTC().Format("2006-01-02T15:04")
+}
+
+func valueAsString(v interface{}) string {
+	if v == nil {
+		return ""
+	}
+	switch t := v.(type) {
+	case string:
+		return strings.TrimSpace(t)
+	case fmt.Stringer:
+		return strings.TrimSpace(t.String())
+	default:
+		out := strings.TrimSpace(fmt.Sprintf("%v", v))
+		if out == "<nil>" {
+			return ""
+		}
+		return out
+	}
+}
+
+func valueAsFloat(v interface{}) float64 {
+	switch t := v.(type) {
+	case float64:
+		return t
+	case float32:
+		return float64(t)
+	case int:
+		return float64(t)
+	case int64:
+		return float64(t)
+	case int32:
+		return float64(t)
+	case int16:
+		return float64(t)
+	case int8:
+		return float64(t)
+	case uint:
+		return float64(t)
+	case uint64:
+		return float64(t)
+	case uint32:
+		return float64(t)
+	case uint16:
+		return float64(t)
+	case uint8:
+		return float64(t)
+	case json.Number:
+		f, _ := t.Float64()
+		return f
+	case string:
+		f, _ := strconv.ParseFloat(strings.TrimSpace(t), 64)
+		return f
+	default:
+		return 0
+	}
+}
+
+func valueAsInt(v interface{}) int {
+	return int(math.Round(valueAsFloat(v)))
+}
+
+func roundTo(v float64, decimals int) float64 {
+	if math.IsNaN(v) || math.IsInf(v, 0) {
+		return 0
+	}
+	p := math.Pow10(decimals)
+	return math.Round(v*p) / p
+}
+
+func clamp(v, minV, maxV float64) float64 {
+	if v < minV {
+		return minV
+	}
+	if v > maxV {
+		return maxV
+	}
+	return v
+}
+
+func normalizeTrendScore(raw float64) float64 {
+	if math.IsNaN(raw) || math.IsInf(raw, 0) {
+		return 0
+	}
+	if raw <= 0 {
+		return 0
+	}
+	if raw <= 1 {
+		return raw * 100
+	}
+	return math.Min(raw, 100)
+}
+
+func parseMarketauxRecord(record map[string]interface{}, fallbackDate string) marketauxEntityStat {
+	symbol := strings.ToUpper(valueAsString(record["symbol"]))
+	if symbol == "" {
+		symbol = strings.ToUpper(valueAsString(record["key"]))
+	}
+	score := valueAsFloat(record["score"])
+	if score == 0 {
+		score = valueAsFloat(record["relevance_score"])
+	}
+	date := valueAsString(record["date"])
+	if date == "" {
+		date = fallbackDate
+	}
+	stat := marketauxEntityStat{
+		Date:           date,
+		Symbol:         symbol,
+		Name:           valueAsString(record["name"]),
+		Country:        strings.ToUpper(valueAsString(record["country"])),
+		Exchange:       strings.ToUpper(valueAsString(record["exchange"])),
+		Industry:       valueAsString(record["industry"]),
+		TotalDocuments: valueAsInt(record["total_documents"]),
+		SentimentAvg:   valueAsFloat(record["sentiment_avg"]),
+		Score:          score,
+	}
+	if math.IsNaN(stat.SentimentAvg) || math.IsInf(stat.SentimentAvg, 0) {
+		stat.SentimentAvg = 0
+	}
+	if math.IsNaN(stat.Score) || math.IsInf(stat.Score, 0) {
+		stat.Score = 0
+	}
+	return stat
+}
+
+func parseMarketauxRows(data interface{}) []marketauxEntityStat {
+	items, ok := data.([]interface{})
+	if !ok {
+		return nil
+	}
+	out := make([]marketauxEntityStat, 0, len(items))
+	for _, item := range items {
+		row, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		fallbackDate := valueAsString(row["date"])
+		if nested, hasNested := row["data"].([]interface{}); hasNested {
+			for _, inner := range nested {
+				innerRow, ok := inner.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				out = append(out, parseMarketauxRecord(innerRow, fallbackDate))
+			}
+			continue
+		}
+		out = append(out, parseMarketauxRecord(row, fallbackDate))
+	}
+	return out
+}
+
+func queryMarketaux(path string, params url.Values) ([]marketauxEntityStat, error) {
+	if marketauxAPIKey == "" {
+		return nil, fmt.Errorf("MARKETAUX_API_KEY missing")
+	}
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+	p := url.Values{}
+	for k, vals := range params {
+		for _, val := range vals {
+			p.Add(k, val)
+		}
+	}
+	p.Set("api_token", marketauxAPIKey)
+	endpoint := "https://api.marketaux.com" + path + "?" + p.Encode()
+	req, err := http.NewRequest(http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	client := &http.Client{Timeout: 12 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		msg := strings.TrimSpace(string(body))
+		if msg == "" {
+			msg = resp.Status
+		}
+		return nil, fmt.Errorf("Marketaux %s: %s", path, msg)
+	}
+	var payload map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, err
+	}
+	return parseMarketauxRows(payload["data"]), nil
+}
+
+func pickStatForSymbol(stats []marketauxEntityStat, symbol string) marketauxEntityStat {
+	needle := strings.ToUpper(strings.TrimSpace(symbol))
+	for _, stat := range stats {
+		if strings.EqualFold(stat.Symbol, needle) {
+			return stat
+		}
+	}
+	if len(stats) > 0 {
+		return stats[0]
+	}
+	return marketauxEntityStat{Symbol: needle}
+}
+
+func statToMap(stat marketauxEntityStat) map[string]interface{} {
+	return map[string]interface{}{
+		"date":            stat.Date,
+		"symbol":          stat.Symbol,
+		"name":            stat.Name,
+		"country":         stat.Country,
+		"exchange":        stat.Exchange,
+		"industry":        stat.Industry,
+		"total_documents": stat.TotalDocuments,
+		"sentiment_avg":   roundTo(stat.SentimentAvg, 4),
+		"score":           roundTo(normalizeTrendScore(stat.Score), 2),
+	}
+}
+
+func maxTime(a, b time.Time) time.Time {
+	if a.After(b) {
+		return a
+	}
+	return b
+}
+
+func buildLeaderReason(stat marketauxEntityStat) string {
+	docs := stat.TotalDocuments
+	sent := stat.SentimentAvg
+	score := normalizeTrendScore(stat.Score)
+	switch {
+	case docs >= 15 && sent >= 0.25:
+		return "Headline surge with bullish tone"
+	case docs >= 15 && sent <= -0.25:
+		return "Headline surge with bearish tone"
+	case score >= 70 && sent >= 0.15:
+		return "High trend score and positive narrative"
+	case score >= 70 && sent <= -0.15:
+		return "High trend score and negative narrative"
+	case docs >= 10 && math.Abs(sent) < 0.1:
+		return "Heavy headline flow, direction still mixed"
+	case sent >= 0.35:
+		return "Strong positive sentiment skew"
+	case sent <= -0.35:
+		return "Strong negative sentiment skew"
+	default:
+		return "Moderate news pressure"
+	}
+}
+
+func buildTickerRadar(m15, m60, session, trend marketauxEntityStat) map[string]interface{} {
+	docs15 := float64(m15.TotalDocuments)
+	docs60 := float64(m60.TotalDocuments)
+	sent15 := m15.SentimentAvg
+	sent60 := m60.SentimentAvg
+	sentShift := sent15 - sent60
+	trendScore := normalizeTrendScore(trend.Score)
+	if trendScore == 0 {
+		trendScore = normalizeTrendScore(session.Score)
+	}
+	avgPer15m := math.Max(docs60/4.0, 1)
+	docsAcceleration := docs15 / avgPer15m
+	pulseScore := clamp(
+		docsAcceleration*28+
+			math.Abs(sentShift)*110+
+			math.Min(docs15, 12)*2.2+
+			trendScore*0.35,
+		0,
+		100,
+	)
+	confidence := clamp(
+		math.Min(docs15, 20)*3.2+
+			math.Abs(sent15)*45+
+			math.Abs(sentShift)*35,
+		0,
+		100,
+	)
+	bias := "NEUTRAL"
+	reason := "News flow is balanced; use price action confirmation."
+	switch {
+	case docs15 >= 5 && sent15 >= 0.22:
+		bias = "LONG"
+		reason = "Fresh positive headlines with elevated mention velocity."
+	case docs15 >= 5 && sent15 <= -0.22:
+		bias = "SHORT"
+		reason = "Fresh negative headlines with elevated mention velocity."
+	case sentShift >= 0.2 && docs15 >= 3:
+		bias = "LONG"
+		reason = "Sentiment is improving quickly versus the prior hour."
+	case sentShift <= -0.2 && docs15 >= 3:
+		bias = "SHORT"
+		reason = "Sentiment is deteriorating quickly versus the prior hour."
+	}
+	return map[string]interface{}{
+		"pulse_score":        roundTo(pulseScore, 1),
+		"confidence":         roundTo(confidence, 1),
+		"bias":               bias,
+		"bias_reason":        reason,
+		"docs_acceleration":  roundTo(docsAcceleration, 2),
+		"sentiment_shift":    roundTo(sentShift, 4),
+		"trend_score":        roundTo(trendScore, 2),
+		"documents_last_15m": m15.TotalDocuments,
+		"documents_last_60m": m60.TotalDocuments,
+		"documents_session":  session.TotalDocuments,
+		"sentiment_15m":      roundTo(sent15, 4),
+		"sentiment_60m":      roundTo(sent60, 4),
+		"sentiment_session":  roundTo(session.SentimentAvg, 4),
+	}
 }
 
 func queryPolygon(sym string, mult int, span, from, to string) ([]polygonBar, error) {
@@ -747,6 +1076,246 @@ func extraHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(out)
 }
 
+func marketStatsHandler(w http.ResponseWriter, r *http.Request) {
+	if marketauxAPIKey == "" {
+		http.Error(w, "MARKETAUX_API_KEY missing", http.StatusServiceUnavailable)
+		return
+	}
+	q := r.URL.Query()
+	ticker := strings.ToUpper(strings.TrimSpace(q.Get("ticker")))
+	if ticker == "" {
+		http.Error(w, "ticker required", http.StatusBadRequest)
+		return
+	}
+	loc, _ := time.LoadLocation("America/New_York")
+	nowET := time.Now().In(loc)
+	day := time.Date(nowET.Year(), nowET.Month(), nowET.Day(), 0, 0, 0, 0, loc)
+	if raw := strings.TrimSpace(q.Get("date")); raw != "" {
+		parsed, err := time.ParseInLocation("2006-01-02", raw, loc)
+		if err != nil {
+			http.Error(w, "date must be YYYY-MM-DD", http.StatusBadRequest)
+			return
+		}
+		day = parsed
+	}
+	sessionStart := time.Date(day.Year(), day.Month(), day.Day(), 4, 0, 0, 0, loc)
+	sessionEnd := time.Date(day.Year(), day.Month(), day.Day(), 20, 0, 0, 0, loc)
+	queryEnd := sessionEnd
+	if day.Year() == nowET.Year() && day.YearDay() == nowET.YearDay() && nowET.Before(sessionEnd) {
+		queryEnd = nowET
+	}
+	if queryEnd.Before(sessionStart) {
+		queryEnd = sessionStart.Add(15 * time.Minute)
+	}
+	m15Start := maxTime(sessionStart, queryEnd.Add(-15*time.Minute))
+	m60Start := maxTime(sessionStart, queryEnd.Add(-60*time.Minute))
+	intradayStart := maxTime(sessionStart, queryEnd.Add(-180*time.Minute))
+	leadersStart := maxTime(sessionStart, queryEnd.Add(-90*time.Minute))
+
+	aggregationQuery := func(from, to time.Time) ([]marketauxEntityStat, error) {
+		params := url.Values{}
+		params.Set("symbols", ticker)
+		params.Set("group_by", "symbol")
+		params.Set("published_after", marketauxDateTimeUTC(from))
+		params.Set("published_before", marketauxDateTimeUTC(to))
+		params.Set("limit", "20")
+		return queryMarketaux("/v1/entity/stats/aggregation", params)
+	}
+
+	type statsResult struct {
+		rows []marketauxEntityStat
+		err  error
+	}
+	results := map[string]statsResult{}
+	var mu sync.Mutex
+	setResult := func(key string, rows []marketauxEntityStat, err error) {
+		mu.Lock()
+		defer mu.Unlock()
+		results[key] = statsResult{rows: rows, err: err}
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(5)
+	go func() {
+		defer wg.Done()
+		rows, err := aggregationQuery(m15Start, queryEnd)
+		setResult("m15", rows, err)
+	}()
+	go func() {
+		defer wg.Done()
+		rows, err := aggregationQuery(m60Start, queryEnd)
+		setResult("m60", rows, err)
+	}()
+	go func() {
+		defer wg.Done()
+		rows, err := aggregationQuery(sessionStart, queryEnd)
+		setResult("session", rows, err)
+	}()
+	go func() {
+		defer wg.Done()
+		params := url.Values{}
+		params.Set("symbols", ticker)
+		params.Set("interval", "minute")
+		params.Set("group_by", "symbol")
+		params.Set("published_after", marketauxDateTimeUTC(intradayStart))
+		params.Set("published_before", marketauxDateTimeUTC(queryEnd))
+		rows, err := queryMarketaux("/v1/entity/stats/intraday", params)
+		setResult("intraday", rows, err)
+	}()
+	go func() {
+		defer wg.Done()
+		params := url.Values{}
+		params.Set("countries", "us")
+		params.Set("group_by", "symbol")
+		params.Set("published_after", marketauxDateTimeUTC(leadersStart))
+		params.Set("published_before", marketauxDateTimeUTC(queryEnd))
+		params.Set("min_doc_count", "4")
+		params.Set("limit", "20")
+		rows, err := queryMarketaux("/v1/entity/trending/aggregation", params)
+		setResult("leaders", rows, err)
+	}()
+	wg.Wait()
+
+	var warnings []string
+	for key, result := range results {
+		if result.err != nil {
+			warnings = append(warnings, key+": "+result.err.Error())
+		}
+	}
+	allFailed := true
+	for _, result := range results {
+		if result.err == nil {
+			allFailed = false
+			break
+		}
+	}
+	if allFailed {
+		out := map[string]interface{}{
+			"enabled":      false,
+			"provider":     "Marketaux Market Stats",
+			"ticker":       ticker,
+			"date":         day.Format("2006-01-02"),
+			"published_at": time.Now().UTC().Format(time.RFC3339),
+			"query_window": map[string]string{
+				"published_after":  marketauxDateTimeUTC(sessionStart),
+				"published_before": marketauxDateTimeUTC(queryEnd),
+			},
+			"windows": map[string]interface{}{
+				"m15":     statToMap(marketauxEntityStat{Symbol: ticker}),
+				"m60":     statToMap(marketauxEntityStat{Symbol: ticker}),
+				"session": statToMap(marketauxEntityStat{Symbol: ticker}),
+			},
+			"radar": map[string]interface{}{
+				"pulse_score":        0,
+				"confidence":         0,
+				"bias":               "NEUTRAL",
+				"bias_reason":        "Marketaux data temporarily unavailable.",
+				"docs_acceleration":  0,
+				"sentiment_shift":    0,
+				"trend_score":        0,
+				"documents_last_15m": 0,
+				"documents_last_60m": 0,
+				"documents_session":  0,
+				"sentiment_15m":      0,
+				"sentiment_60m":      0,
+				"sentiment_session":  0,
+			},
+			"intraday": []map[string]interface{}{},
+			"leaders":  []map[string]interface{}{},
+			"warnings": warnings,
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(out)
+		return
+	}
+
+	m15Stat := pickStatForSymbol(results["m15"].rows, ticker)
+	m60Stat := pickStatForSymbol(results["m60"].rows, ticker)
+	sessionStat := pickStatForSymbol(results["session"].rows, ticker)
+	trendStat := pickStatForSymbol(results["leaders"].rows, ticker)
+
+	intradayRows := make([]map[string]interface{}, 0, len(results["intraday"].rows))
+	for _, stat := range results["intraday"].rows {
+		if stat.Symbol != "" && !strings.EqualFold(stat.Symbol, ticker) {
+			continue
+		}
+		intradayRows = append(intradayRows, map[string]interface{}{
+			"date":            stat.Date,
+			"total_documents": stat.TotalDocuments,
+			"sentiment_avg":   roundTo(stat.SentimentAvg, 4),
+		})
+	}
+	sort.Slice(intradayRows, func(i, j int) bool {
+		return valueAsString(intradayRows[i]["date"]) < valueAsString(intradayRows[j]["date"])
+	})
+	if len(intradayRows) > 120 {
+		intradayRows = intradayRows[len(intradayRows)-120:]
+	}
+
+	leaderMap := make(map[string]marketauxEntityStat)
+	for _, stat := range results["leaders"].rows {
+		sym := strings.ToUpper(strings.TrimSpace(stat.Symbol))
+		if sym == "" {
+			continue
+		}
+		prev, exists := leaderMap[sym]
+		if !exists || normalizeTrendScore(stat.Score) > normalizeTrendScore(prev.Score) || stat.TotalDocuments > prev.TotalDocuments {
+			leaderMap[sym] = stat
+		}
+	}
+	leaders := make([]marketauxEntityStat, 0, len(leaderMap))
+	for _, stat := range leaderMap {
+		leaders = append(leaders, stat)
+	}
+	sort.Slice(leaders, func(i, j int) bool {
+		si, sj := normalizeTrendScore(leaders[i].Score), normalizeTrendScore(leaders[j].Score)
+		if si == sj {
+			return leaders[i].TotalDocuments > leaders[j].TotalDocuments
+		}
+		return si > sj
+	})
+	if len(leaders) > 12 {
+		leaders = leaders[:12]
+	}
+	leaderRows := make([]map[string]interface{}, 0, len(leaders))
+	for _, stat := range leaders {
+		leaderRows = append(leaderRows, map[string]interface{}{
+			"symbol":          stat.Symbol,
+			"name":            stat.Name,
+			"exchange":        stat.Exchange,
+			"country":         stat.Country,
+			"industry":        stat.Industry,
+			"total_documents": stat.TotalDocuments,
+			"sentiment_avg":   roundTo(stat.SentimentAvg, 4),
+			"score":           roundTo(normalizeTrendScore(stat.Score), 2),
+			"why":             buildLeaderReason(stat),
+		})
+	}
+
+	out := map[string]interface{}{
+		"enabled":      true,
+		"provider":     "Marketaux Market Stats",
+		"ticker":       ticker,
+		"date":         day.Format("2006-01-02"),
+		"published_at": time.Now().UTC().Format(time.RFC3339),
+		"query_window": map[string]string{
+			"published_after":  marketauxDateTimeUTC(sessionStart),
+			"published_before": marketauxDateTimeUTC(queryEnd),
+		},
+		"windows": map[string]interface{}{
+			"m15":     statToMap(m15Stat),
+			"m60":     statToMap(m60Stat),
+			"session": statToMap(sessionStat),
+		},
+		"radar":    buildTickerRadar(m15Stat, m60Stat, sessionStat, trendStat),
+		"intraday": intradayRows,
+		"leaders":  leaderRows,
+		"warnings": warnings,
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(out)
+}
+
 func getPriorTradingDate(ticker, dateStr string) (string, error) {
 	date, err := time.Parse("2006-01-02", dateStr)
 	if err != nil {
@@ -1269,6 +1838,10 @@ func main() {
 	if secAPIKey == "" {
 		log.Fatal("SEC API key missing")
 	}
+	marketauxAPIKey = strings.TrimSpace(os.Getenv("MARKETAUX_API_KEY"))
+	if marketauxAPIKey == "" {
+		marketauxAPIKey = strings.TrimSpace(os.Getenv("MARKETAUX_API_TOKEN"))
+	}
 	patternfolioURL = os.Getenv("PATTERNFOLIO_URL")
 	if patternfolioURL == "" {
 		patternfolioURL = "http://localhost:8082"
@@ -1286,6 +1859,7 @@ func main() {
 	http.HandleFunc("/api/ticker-details", tickerDetailsHandler)
 	http.HandleFunc("/api/share-float", shareFloatHandler)
 	http.HandleFunc("/api/extra", extraHandler)
+	http.HandleFunc("/api/market-stats", marketStatsHandler)
 	http.HandleFunc("/chart", chartHandler)
 	http.HandleFunc("/api/open-chart", openChartHandler)
 	http.HandleFunc("/api/open-chart/", openChartHandler)
