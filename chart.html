@@ -756,7 +756,11 @@ async function loadBaseChart(e, skipDefaultRow = false) {
         baseSmaSeries.setData([]);
         return;
       }
-      const row = { ticker: baseTicker.toUpperCase(), time: '0930', signal: 'buy' };
+      const row = {
+        ticker: baseTicker.toUpperCase(),
+        time: hasSignalTime ? timeStr : '0930',
+        signal
+      };
       NEW_COLUMNS.forEach(col => row[col] = '');
       await calculateBaseMetricsForRow(row);
       baseCsvData = [{ __row: 0, ...row }];
@@ -776,6 +780,12 @@ async function loadBaseChart(e, skipDefaultRow = false) {
         updateBaseTableView();
         showBaseSignalOnChart(baseCsvData[baseCurrentRow]);
       });
+    } else if (baseCsvData.length > 0) {
+      if (baseCurrentRow < 0 || baseCurrentRow >= baseCsvData.length) {
+        baseCurrentRow = 0;
+      }
+      updateBaseTableView();
+      await showBaseSignalOnChart(baseCsvData[baseCurrentRow]);
     }
     // Resize chart after data is loaded
     baseChart.resize(document.getElementById('base-chart').clientWidth, 600);
