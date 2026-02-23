@@ -324,6 +324,12 @@ function getNyTime(dateStr, h, m) {
   if (off2 !== off1) epoch = utcGuess - off2 * 60000;
   return new Date(epoch);
 }
+function setSessionVisibleRange(chart, dateStr) {
+  chart.timeScale().setVisibleRange({
+    from: getNyTime(dateStr, 7, 0).getTime() / 1000,
+    to: getNyTime(dateStr, 16, 0).getTime() / 1000
+  });
+}
 const nyHMFormatter = new Intl.DateTimeFormat('en-US', {
   timeZone: NY_TZ, hour12: false, hour: '2-digit', minute: '2-digit'
 });
@@ -664,7 +670,7 @@ async function load(e, skipDefaultRow = false){
     vwapSeries.setData(data.vwap);
     smaSeries.setData(data.sma);
     candleSeries.setMarkers([]);
-    chart.timeScale().fitContent();
+    setSessionVisibleRange(chart, date);
     drawRthOpenLine(chart, document.getElementById('chart'), date);
     await Promise.all([
       displayExtra(ticker, date),

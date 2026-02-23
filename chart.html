@@ -642,7 +642,7 @@ async function loadSignalChart() {
     } else {
       signalCandleSeries.setMarkers([]);
     }
-    signalChart.timeScale().fitContent();
+    setSessionVisibleRange(signalChart, date);
     drawRthOpenLine(signalChart, document.getElementById('signal-chart'), date);
     await displayMarketRadar('signal', ticker, date);
     const metrics = data.metrics;
@@ -880,6 +880,12 @@ function getNyTime(dateStr, h, m) {
   if (off2 !== off1) epoch = utcGuess - off2 * 60000;
   return new Date(epoch);
 }
+function setSessionVisibleRange(chart, dateStr) {
+  chart.timeScale().setVisibleRange({
+    from: getNyTime(dateStr, 7, 0).getTime() / 1000,
+    to: getNyTime(dateStr, 16, 0).getTime() / 1000
+  });
+}
 const nyHMFormatter = new Intl.DateTimeFormat('en-US', {
   timeZone: NY_TZ, hour12: false, hour: '2-digit', minute: '2-digit'
 });
@@ -1048,7 +1054,7 @@ async function loadBaseChart(e, skipDefaultRow = false) {
     baseVwapSeries.setData(data.vwap);
     baseSmaSeries.setData(data.sma);
     baseCandleSeries.setMarkers([]);
-    baseChart.timeScale().fitContent();
+    setSessionVisibleRange(baseChart, baseDate);
     drawRthOpenLine(baseChart, document.getElementById('base-chart'), baseDate);
     await Promise.all([
       displayBaseExtra(baseTicker, baseDate),
