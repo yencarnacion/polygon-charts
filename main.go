@@ -1447,7 +1447,7 @@ func chartDataHandler(w http.ResponseWriter, r *http.Request) {
 		lastClose = b.C
 		lastTime = b.T
 	}
-	if len(extendedCandles) > 0 && targetHour < 16 {
+	if len(extendedCandles) > 0 {
 		extendTime := time.UnixMilli(lastTime).In(loc).Add(time.Minute)
 		for extendTime.Hour() < 16 {
 			if extendTime.Hour() >= 7 {
