@@ -34,7 +34,7 @@
         radial-gradient(circle at 88% 0%, rgba(31, 60, 105, 0.3), transparent 30%),
         var(--bg);
     }
-    #signal-chart, #base-chart {
+    #signal-chart, #base-chart, #context-daily-chart, #context-intraday-chart {
       height: 600px;
       margin-bottom: 2rem;
       width: 100%;
@@ -58,7 +58,7 @@
     }
     .signal-buy { color: var(--positive); font-weight: bold; }
     .signal-sell { color: var(--negative); font-weight: bold; }
-    #signal-metrics-sheet, #base-sheet, #signal-news-sheet, #signal-filings-sheet, #base-news-sheet, #base-filings-sheet,
+    #signal-metrics-sheet, #base-sheet, #signal-news-sheet, #signal-filings-sheet, #base-news-sheet, #base-filings-sheet, #context-news-sheet, #context-filings-sheet,
     #signal-radar-leaders, #signal-radar-intraday, #base-radar-leaders, #base-radar-intraday {
       margin-top: 1rem;
       max-width: 100%;
@@ -235,6 +235,9 @@
     <li class="nav-item" role="presentation">
       <button class="nav-link" id="base-tab" data-bs-toggle="tab" data-bs-target="#base" type="button" role="tab" aria-controls="base" aria-selected="false">Base Chart</button>
     </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link" id="context-tab" data-bs-toggle="tab" data-bs-target="#context" type="button" role="tab" aria-controls="context" aria-selected="false">Context</button>
+    </li>
   </ul>
   <!-- Tab Content -->
   <div class="tab-content" id="chartTabContent">
@@ -322,6 +325,33 @@
       <div id="base-filings-sheet"></div>
       <div id="base-profile-container" class="profile-container"></div>
     </div>
+    <div class="tab-pane fade" id="context" role="tabpanel" aria-labelledby="context-tab">
+      <div class="signal-info">
+        <h3>Context - {{TICKER}} around {{DATE}}</h3>
+        <p>Daily context: four months before {{DATE}}. Intraday context: 15-minute candles from 07:00 to 16:00 ET.</p>
+      </div>
+      <div class="row g-3">
+        <div class="col-12 col-xl-6">
+          <h4>Daily Candles + Volume (Four Months Prior)</h4>
+          <div id="context-daily-chart" class="border rounded"></div>
+        </div>
+        <div class="col-12 col-xl-6">
+          <h4>15-Minute Candles + Volume + VWAP (Signal Day)</h4>
+          <div id="context-intraday-chart" class="border rounded"></div>
+        </div>
+      </div>
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <h4 class="mb-0">News Headlines for the Day</h4>
+        <button id="context-copy-news" class="btn btn-secondary btn-sm">Copy News JSON</button>
+      </div>
+      <div id="context-news-sheet"></div>
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <h4 class="mb-0">SEC Filings for the Day</h4>
+        <button id="context-copy-filings" class="btn btn-secondary btn-sm">Copy Filings JSON</button>
+      </div>
+      <div id="context-filings-sheet"></div>
+      <div id="context-profile-container" class="profile-container"></div>
+    </div>
   </div>
 </div>
 <!-- Libraries -->
@@ -336,12 +366,25 @@ const patternfolioURL = "{{PATTERNFOLIO_URL}}";
 // Signal Chart Logic
 let signalListenersAdded = false;
 let signalChart, signalCandleSeries, signalVolumeSeries, signalVwapSeries, signalSmaSeries;
+let contextListenersAdded = false;
+let contextLoaded = false;
+let contextDailyChart, contextDailyCandleSeries, contextDailyVolumeSeries;
+let contextIntradayChart, contextIntradayCandleSeries, contextIntradayVolumeSeries, contextIntradayVwapSeries;
+let contextNews = [], contextFilings = [];
 const radarTables = {};
 const nyTime = ts =>
   new Date(ts * 1000).toLocaleTimeString(
     'en-US',
     { timeZone: 'America/New_York', hour12: false, hour: '2-digit', minute: '2-digit' }
   );
+const nyDate = ts =>
+  (() => {
+    const d = new Date(ts * 1000);
+    const y = d.getUTCFullYear();
+    const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(d.getUTCDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  })();
  
 
 function initSignalChart() {
@@ -814,6 +857,337 @@ function combineDateAndTime(dateStr, HHMM) {
   return getNyTime(dateStr, h, m).getTime();
 }
 
+function formatIsoDate(dateObj) {
+  const y = dateObj.getUTCFullYear();
+  const m = String(dateObj.getUTCMonth() + 1).padStart(2, '0');
+  const d = String(dateObj.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function shiftDate(dateStr, dayDelta) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() + dayDelta);
+  return formatIsoDate(dt);
+}
+
+function shiftDateMonths(dateStr, monthDelta) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCMonth(dt.getUTCMonth() + monthDelta);
+  return formatIsoDate(dt);
+}
+
+function initContextCharts() {
+  if (!contextDailyChart) {
+    contextDailyChart = LightweightCharts.createChart(document.getElementById('context-daily-chart'), {
+      layout: { background: { color: '#121d2d' }, textColor: '#d7e4f4' },
+      grid: { vertLines: { color: '#2b3a52' }, horzLines: { color: '#2b3a52' } },
+      timeScale: { timeVisible: false, secondsVisible: false },
+      localization: { timeFormatter: nyDate }
+    });
+    contextDailyChart.timeScale().applyOptions({ tickMarkFormatter: nyDate });
+    contextDailyCandleSeries = contextDailyChart.addCandlestickSeries({
+      upColor: '#21c58f', downColor: '#ff8a5a',
+      wickUpColor: '#21c58f', wickDownColor: '#ff8a5a', borderVisible: false
+    });
+    contextDailyVolumeSeries = contextDailyChart.addHistogramSeries({
+      color: '#67819f', priceFormat: { type: 'volume' },
+      priceScaleId: 'vol', scaleMargins: { top: 0.75, bottom: 0 }
+    });
+    contextDailyChart.priceScale('right').applyOptions({ scaleMargins: { top: 0.05, bottom: 0.35 } });
+    contextDailyChart.priceScale('vol').applyOptions({ scaleMargins: { top: 0.75, bottom: 0 } });
+  }
+  if (!contextIntradayChart) {
+    contextIntradayChart = LightweightCharts.createChart(document.getElementById('context-intraday-chart'), {
+      layout: { background: { color: '#121d2d' }, textColor: '#d7e4f4' },
+      grid: { vertLines: { color: '#2b3a52' }, horzLines: { color: '#2b3a52' } },
+      timeScale: { timeVisible: true, secondsVisible: false },
+      localization: { timeFormatter: nyTime }
+    });
+    contextIntradayChart.timeScale().applyOptions({ tickMarkFormatter: nyTime });
+    contextIntradayCandleSeries = contextIntradayChart.addCandlestickSeries({
+      upColor: '#21c58f', downColor: '#ff8a5a',
+      wickUpColor: '#21c58f', wickDownColor: '#ff8a5a', borderVisible: false
+    });
+    contextIntradayVolumeSeries = contextIntradayChart.addHistogramSeries({
+      color: '#67819f', priceFormat: { type: 'volume' },
+      priceScaleId: 'vol', scaleMargins: { top: 0.75, bottom: 0 }
+    });
+    contextIntradayChart.priceScale('right').applyOptions({ scaleMargins: { top: 0.03, bottom: 0.25 } });
+    contextIntradayChart.priceScale('vol').applyOptions({ scaleMargins: { top: 0.78, bottom: 0 } });
+    contextIntradayVwapSeries = contextIntradayChart.addLineSeries({ color: '#ffd166', lineWidth: 2 });
+  }
+}
+
+function renderContextExtra(data) {
+  contextNews = data.news || [];
+  new Tabulator("#context-news-sheet", {
+    data: contextNews,
+    layout: "fitColumns",
+    headerWordWrap: true,
+    tooltipsHeader: true,
+    tooltips: truncatedTooltip,
+    columns: [
+      {
+        title: "PUBLISHED", field: "published", minWidth: 150, headerSort: false, headerTooltip: true, vertAlign: "top",
+        formatter: function(cell) { return new Date(cell.getValue()).toLocaleString(); }
+      },
+      {
+        title: "TITLE", field: "title", minWidth: 400, headerSort: false, headerTooltip: true, vertAlign: "top",
+        formatter: "link", formatterParams: { urlField: "url", target: "_blank", labelField: "title" }
+      },
+      { title: "SOURCE", field: "source", minWidth: 150, headerSort: false, headerTooltip: true, vertAlign: "top" },
+    ],
+  });
+  contextFilings = data.filings || [];
+  new Tabulator("#context-filings-sheet", {
+    data: contextFilings,
+    layout: "fitColumns",
+    headerWordWrap: true,
+    tooltipsHeader: true,
+    tooltips: truncatedTooltip,
+    columns: [
+      {
+        title: "FILED AT", field: "filedAt", minWidth: 150, headerSort: false, headerTooltip: true, vertAlign: "top",
+        formatter: function(cell) { return new Date(cell.getValue()).toLocaleString(); }
+      },
+      { title: "FORM TYPE", field: "formType", minWidth: 100, headerSort: false, headerTooltip: true, vertAlign: "top" },
+      {
+        title: "DESCRIPTION", field: "description", minWidth: 400, headerSort: false, headerTooltip: true, vertAlign: "top",
+        formatter: "link", formatterParams: { urlField: "linkToFilingDetails", target: "_blank", labelField: "description" }
+      },
+      { title: "COMPANY", field: "companyName", minWidth: 200, headerSort: false, headerTooltip: true, vertAlign: "top" },
+    ],
+  });
+
+  const profile = data.profile || null;
+  const profileContainer = document.getElementById('context-profile-container');
+  profileContainer.innerHTML = '';
+  const prof = Array.isArray(profile) ? profile[0] : profile;
+  if (prof && Object.keys(prof).length) {
+    profileContainer.innerHTML = `
+      <h4>Company Profile (Easy Digest for Day Traders)</h4>
+      <img src="${prof.image || ''}" alt="${prof.companyName || 'Company Logo'}">
+      <h5>${prof.companyName || 'N/A'}</h5>
+      <p><strong>Exchange:</strong> ${prof.exchange || 'N/A'}</p>
+      <p><strong>Industry:</strong> ${prof.industry || 'N/A'}</p>
+      <p><strong>Sector:</strong> ${prof.sector || 'N/A'}</p>
+      <p><strong>Country/State:</strong> ${prof.country || 'N/A'} / ${prof.state || 'N/A'}</p>
+      <p><strong>Full-time Employees:</strong> ${prof.fullTimeEmployees ? Number(prof.fullTimeEmployees).toLocaleString() : 'N/A'}</p>
+      <p><strong>Beta:</strong> ${prof.beta ? Number(prof.beta).toFixed(2) : 'N/A'}</p>
+      <p><strong>Last Dividend:</strong> ${prof.lastDividend ? Number(prof.lastDividend).toFixed(2) : 'N/A'}</p>
+      <p><strong>52W Range:</strong> ${prof.range || 'N/A'}</p>
+      <p><strong>Website:</strong> <a href="${prof.website || '#'}" target="_blank" rel="noopener noreferrer">${prof.website || 'N/A'}</a></p>
+      <p><strong>Description:</strong> ${prof.description || 'N/A'}</p>
+      <p><strong>IPO Date:</strong> ${prof.ipoDate || 'N/A'}</p>
+      <p><strong>Is ETF:</strong> ${prof.isEtf ? 'Yes' : 'No'}</p>
+    `;
+  }
+}
+
+function buildContextIntradayVwap(candles, volumes, rawVwap) {
+  if (!Array.isArray(candles) || candles.length === 0) return [];
+  const vwapInput = Array.isArray(rawVwap) ? rawVwap : [];
+  const candleTimes = new Set(candles.map(c => c.time));
+  const aligned = vwapInput.filter(p => candleTimes.has(p.time));
+  if (aligned.length === candles.length) {
+    return aligned;
+  }
+  // Fallback: compute VWAP on the same 15-minute bars so time scale stays aligned.
+  let cumPV = 0;
+  let cumV = 0;
+  const out = [];
+  for (let i = 0; i < candles.length; i++) {
+    const c = candles[i];
+    const v = Number(volumes?.[i]?.value || 0);
+    const typ = (c.high + c.low + c.close) / 3;
+    cumPV += typ * v;
+    cumV += v;
+    out.push({
+      time: c.time,
+      value: cumV > 0 ? (cumPV / cumV) : (out.length ? out[out.length - 1].value : c.close)
+    });
+  }
+  return out;
+}
+
+function normalizeHHMMClient(timeValue) {
+  const raw = String(timeValue || '').trim().replace(':', '');
+  if (!raw) return '';
+  if (!/^\d{4}$/.test(raw)) return '';
+  const h = Number(raw.slice(0, 2));
+  const m = Number(raw.slice(2, 4));
+  if (h < 0 || h > 23 || m < 0 || m > 59) return '';
+  return raw;
+}
+
+function utcDateKeyFromEpochSec(ts) {
+  const d = new Date(Number(ts) * 1000);
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(d.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function buildContextDailyWithPartial(dailyCandles, dailyVolume, minCandles, minVolume, dateStr, cutoffHHMM) {
+  const candles = Array.isArray(dailyCandles) ? [...dailyCandles] : [];
+  const volume = Array.isArray(dailyVolume) ? [...dailyVolume] : [];
+  const mins = Array.isArray(minCandles) ? minCandles : [];
+  const minVols = Array.isArray(minVolume) ? minVolume : [];
+  if (!mins.length) return { candles, volume };
+
+  const cutoff = normalizeHHMMClient(cutoffHHMM);
+  let cutoffHour = 23;
+  let cutoffMin = 59;
+  if (cutoff) {
+    cutoffHour = Number(cutoff.slice(0, 2));
+    cutoffMin = Number(cutoff.slice(2, 4));
+  }
+
+  const rows = [];
+  for (let i = 0; i < mins.length; i++) {
+    const c = mins[i];
+    if (!c || utcDateKeyFromEpochSec(c.time) !== dateStr) continue;
+    const [h, m] = nyHourMinute(c.time * 1000);
+    if (h > cutoffHour || (h === cutoffHour && m > cutoffMin)) continue;
+    rows.push({ candle: c, volume: Number(minVols?.[i]?.value || 0) });
+  }
+  if (!rows.length) return { candles, volume };
+
+  const first = rows[0].candle;
+  const last = rows[rows.length - 1].candle;
+  let high = Number(first.high);
+  let low = Number(first.low);
+  let dayVolume = 0;
+  for (const r of rows) {
+    const c = r.candle;
+    if (Number(c.high) > high) high = Number(c.high);
+    if (Number(c.low) < low) low = Number(c.low);
+    dayVolume += Number(r.volume || 0);
+  }
+  const [Y, M, D] = dateStr.split('-').map(Number);
+  const dayTs = Math.floor(Date.UTC(Y, M - 1, D) / 1000);
+  const partialCandle = {
+    time: dayTs,
+    open: Number(first.open),
+    high,
+    low,
+    close: Number(last.close)
+  };
+  const partialVolume = { time: dayTs, value: dayVolume };
+
+  const mergedCandles = candles.filter(c => utcDateKeyFromEpochSec(c.time) !== dateStr);
+  const mergedVolume = volume.filter(v => utcDateKeyFromEpochSec(v.time) !== dateStr);
+  mergedCandles.push(partialCandle);
+  mergedVolume.push(partialVolume);
+  mergedCandles.sort((a, b) => a.time - b.time);
+  mergedVolume.sort((a, b) => a.time - b.time);
+  return { candles: mergedCandles, volume: mergedVolume };
+}
+
+async function loadContextTab() {
+  if (contextLoaded) {
+    if (contextDailyChart) {
+      contextDailyChart.resize(document.getElementById('context-daily-chart').clientWidth, 600);
+    }
+    if (contextIntradayChart) {
+      contextIntradayChart.resize(document.getElementById('context-intraday-chart').clientWidth, 600);
+      setSessionVisibleRange(contextIntradayChart, date);
+      drawRthOpenLine(contextIntradayChart, document.getElementById('context-intraday-chart'), date);
+    }
+    return;
+  }
+  initContextCharts();
+  const dailyFrom = shiftDateMonths(date, -4);
+  const dailyTo = date;
+  try {
+    const [dailyResp, contextResp, minuteResp] = await Promise.all([
+      axios.get('/api/candles', { params: { ticker, timeframe: '1d', from: dailyFrom, to: dailyTo } }),
+      axios.get('/api/chart-data', { params: { ticker, date, resolution: '15m' } }),
+      axios.get('/api/candles', { params: { ticker, timeframe: '1m', date } })
+    ]);
+
+    const daily = dailyResp.data || {};
+    const minuteData = minuteResp.data || {};
+    const dailyWithPartial = buildContextDailyWithPartial(
+      daily.candles || [],
+      daily.volume || [],
+      minuteData.candles || [],
+      minuteData.volume || [],
+      date,
+      hasSignalTime ? timeStr : ''
+    );
+    const intraday = contextResp.data || {};
+    contextDailyCandleSeries.setData(dailyWithPartial.candles);
+    contextDailyVolumeSeries.setData(dailyWithPartial.volume);
+
+    const intradayCandles = intraday.candles || [];
+    const intradayVolume = intraday.volume || [];
+    contextIntradayCandleSeries.setData(intradayCandles);
+    contextIntradayVolumeSeries.setData(intradayVolume);
+    contextIntradayVwapSeries.setData(buildContextIntradayVwap(intradayCandles, intradayVolume, intraday.vwap || []));
+    setSessionVisibleRange(contextIntradayChart, date);
+    drawRthOpenLine(contextIntradayChart, document.getElementById('context-intraday-chart'), date);
+
+    renderContextExtra(contextResp.data || {});
+    contextLoaded = true;
+    contextDailyChart.resize(document.getElementById('context-daily-chart').clientWidth, 600);
+    contextIntradayChart.resize(document.getElementById('context-intraday-chart').clientWidth, 600);
+    setSessionVisibleRange(contextIntradayChart, date);
+    drawRthOpenLine(contextIntradayChart, document.getElementById('context-intraday-chart'), date);
+
+    if (!contextListenersAdded) {
+      document.getElementById('context-copy-news').addEventListener('click', () => {
+        if (contextNews.length === 0) {
+          alert('No news data available.');
+          return;
+        }
+        const jsonData = {
+          ticker: ticker,
+          news: contextNews.map(item => ({
+            published: item.published,
+            title: item.title,
+            source: item.source,
+            url: item.url
+          }))
+        };
+        navigator.clipboard.writeText(JSON.stringify(jsonData, null, 2)).then(() => {
+          alert('News JSON copied to clipboard!');
+        }).catch(err => {
+          console.error('Failed to copy: ', err);
+          alert('Failed to copy to clipboard.');
+        });
+      });
+      document.getElementById('context-copy-filings').addEventListener('click', () => {
+        if (contextFilings.length === 0) {
+          alert('No filings data available.');
+          return;
+        }
+        const jsonData = {
+          ticker: ticker,
+          filings: contextFilings.map(item => ({
+            filedAt: item.filedAt,
+            formType: item.formType,
+            description: item.description,
+            companyName: item.companyName,
+            url: item.linkToFilingDetails
+          }))
+        };
+        navigator.clipboard.writeText(JSON.stringify(jsonData, null, 2)).then(() => {
+          alert('SEC Filings JSON copied to clipboard!');
+        }).catch(err => {
+          console.error('Failed to copy: ', err);
+          alert('Failed to copy to clipboard.');
+        });
+      });
+      contextListenersAdded = true;
+    }
+  } catch (err) {
+    console.error('[loadContextTab] error', err);
+  }
+}
+
 // Base Chart Logic
 let baseListenersAdded = false;
 let baseCsvData = [], baseCurrentRow = 0, baseIsCsvUploaded = false;
@@ -900,6 +1274,16 @@ function nyHourMinute(epochMillis) {
 }
 
 function drawRthOpenLine(chart, containerEl, dateStr) {
+  const toEpochSec = (t) => {
+    if (typeof t === 'number') return t;
+    if (t && typeof t === 'object') {
+      if (typeof t.timestamp === 'number') return t.timestamp;
+      if (typeof t.year === 'number' && typeof t.month === 'number' && typeof t.day === 'number') {
+        return Date.UTC(t.year, t.month - 1, t.day) / 1000;
+      }
+    }
+    return NaN;
+  };
   let line = containerEl.querySelector('.rth-line');
   let label = containerEl.querySelector('.rth-label');
   if (!line) {
@@ -910,8 +1294,19 @@ function drawRthOpenLine(chart, containerEl, dateStr) {
   chart.__rthTarget = getNyTime(dateStr, 9, 30).getTime() / 1000;
   if (!chart.__rthHandler) {
     chart.__rthHandler = () => {
-      const x = chart.timeScale().timeToCoordinate(chart.__rthTarget);
+      let x = chart.timeScale().timeToCoordinate(chart.__rthTarget);
       if (x == null) {
+        const vr = chart.timeScale().getVisibleRange();
+        const from = vr ? toEpochSec(vr.from) : NaN;
+        const to = vr ? toEpochSec(vr.to) : NaN;
+        if (Number.isFinite(from) && Number.isFinite(to) && to > from) {
+          const width = containerEl.clientWidth || containerEl.getBoundingClientRect().width;
+          if (width > 0) {
+            x = ((chart.__rthTarget - from) / (to - from)) * width;
+          }
+        }
+      }
+      if (x == null || !Number.isFinite(x)) {
         line.style.display = 'none'; label.style.display = 'none'; return;
       }
       line.style.display = 'block'; label.style.display = 'block';
@@ -923,6 +1318,8 @@ function drawRthOpenLine(chart, containerEl, dateStr) {
     window.addEventListener('resize', chart.__rthHandler);
   }
   chart.__rthHandler();
+  requestAnimationFrame(() => chart.__rthHandler());
+  setTimeout(() => chart.__rthHandler(), 60);
 }
 
 async function fetchBasePriorDayClose(ticker, date) {
@@ -1418,6 +1815,9 @@ document.getElementById('base-tab').addEventListener('shown.bs.tab', () => {
     initBaseChart();
   }
   loadBaseChart();
+});
+document.getElementById('context-tab').addEventListener('shown.bs.tab', () => {
+  loadContextTab();
 });
 
 // Initialize Signal Chart
