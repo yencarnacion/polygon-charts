@@ -271,6 +271,8 @@
         <button id="addColumn" class="btn btn-outline-success btn-sm">Add Column</button>
         <button id="prevRow" class="btn btn-outline-light btn-sm">▲ Prev</button>
         <button id="nextRow" class="btn btn-outline-light btn-sm">▼ Next</button>
+        <input id="jumpToChart" type="number" min="1" step="1" class="form-control form-control-sm" placeholder="Chart #" style="max-width:110px">
+        <button id="jumpToChartBtn" class="btn btn-outline-light btn-sm">Go #</button>
         <button id="toggleSignal" class="btn btn-outline-light btn-sm">Toggle Signal</button>
         <button id="postToPatternfolio" class="btn btn-outline-light btn-sm">Post to Patternfolio</button>
         <button id="downloadCsv" class="btn btn-secondary btn-sm ms-auto">Export CSV</button>
@@ -359,12 +361,20 @@ let contextNews = [];
 let contextFilings = [];
 let contextKey = "";
 let watchlistMode = false;
+let navInFlight = false;
+let pendingRowIndex = null;
 
 function setWatchlistStatus(message, isError = false) {
   const el = document.getElementById("watchlistStatus");
   if (!el) return;
   el.textContent = message || "";
   el.style.color = isError ? "var(--negative)" : "var(--muted)";
+}
+
+function isNetworkError(err) {
+  if (!err) return false;
+  const msg = String(err.message || "");
+  return (!err.response && (err.code === "ERR_NETWORK" || /network error/i.test(msg)));
 }
 
 function removeMarketauxSections() {
@@ -1204,9 +1214,21 @@ async function load(e, skipDefaultRow = false){
       await loadContextTab(true);
     }
   }catch(err){
-    console.error('[load] error',err);
+    if (isNetworkError(err)) {
+      console.warn('[load] network error', err.message || err);
+    } else {
+      console.error('[load] error',err);
+    }
     if (watchlistMode) {
-      setWatchlistStatus(`Error loading ${ticker.toUpperCase()}: ${err.response?.data || err.message || err}`, true);
+      if (isNetworkError(err)) {
+        setWatchlistStatus(`API not reachable at http://localhost:8081 while loading ${ticker.toUpperCase()}.`, true);
+      } else {
+        setWatchlistStatus(`Error loading ${ticker.toUpperCase()}: ${err.response?.data || err.message || err}`, true);
+      }
+      return;
+    }
+    if (isNetworkError(err)) {
+      alert('Network error: API server is not reachable at http://localhost:8081');
       return;
     }
     alert('Error: '+(err.response?.data||err));
@@ -1257,6 +1279,11 @@ const NEW_COLUMNS=[
 function updateTableView(){
   if (!csvData.length) {
     document.getElementById('row-indicator').textContent = '0/0';
+    const jumpInput = document.getElementById("jumpToChart");
+    if (jumpInput) {
+      jumpInput.value = "";
+      jumpInput.max = "0";
+    }
     return;
   }
   table.setFilter("__row","=",currentRow);
@@ -1267,6 +1294,11 @@ function updateTableView(){
   });
   // Update row indicator
   document.getElementById('row-indicator').textContent = `${currentRow + 1}/${csvData.length}`;
+  const jumpInput = document.getElementById("jumpToChart");
+  if (jumpInput) {
+    jumpInput.max = String(csvData.length);
+    jumpInput.value = String(currentRow + 1);
+  }
 }
 
 /* ─── Tooltip only for truncated cell values ──────────────── */
@@ -1541,25 +1573,59 @@ document.getElementById('addColumn').onclick=()=>{
 };
 
 function showPrevRow() {
-  if(currentRow>0){
-    currentRow--;
-    console.debug('[nav] prev →',currentRow,csvData[currentRow]);
-    updateTableView();
-    showSignalOnChart(csvData[currentRow]);
-    return true;
-  }
+  if(currentRow>0) return queueRowNavigation(currentRow - 1);
   return false;
 }
 
 function showNextRow() {
-  if(currentRow<csvData.length-1){
-    currentRow++;
-    console.debug('[nav] next →',currentRow,csvData[currentRow]);
-    updateTableView();
-    showSignalOnChart(csvData[currentRow]);
-    return true;
-  }
+  if(currentRow<csvData.length-1) return queueRowNavigation(currentRow + 1);
   return false;
+}
+
+function queueRowNavigation(targetIndex) {
+  if (!csvData.length) return false;
+  const clamped = Math.max(0, Math.min(csvData.length - 1, Number(targetIndex)));
+  if (!Number.isFinite(clamped)) return false;
+  currentRow = clamped;
+  pendingRowIndex = clamped;
+  updateTableView();
+  processRowNavigationQueue();
+  return true;
+}
+
+async function processRowNavigationQueue() {
+  if (navInFlight) return;
+  navInFlight = true;
+  try {
+    while (pendingRowIndex !== null) {
+      const idx = pendingRowIndex;
+      pendingRowIndex = null;
+      const row = csvData[idx];
+      if (!row) continue;
+      console.debug('[nav] show →', idx, row);
+      await showSignalOnChart(row);
+    }
+  } finally {
+    navInFlight = false;
+  }
+}
+
+function jumpToChartNumber() {
+  if (!csvData.length) return;
+  const input = document.getElementById("jumpToChart");
+  const raw = String(input?.value || "").trim();
+  if (!raw) return;
+  const requested = Number(raw);
+  if (!Number.isInteger(requested)) {
+    setWatchlistStatus("Chart number must be a whole number.", true);
+    return;
+  }
+  if (requested < 1 || requested > csvData.length) {
+    setWatchlistStatus(`Chart number must be between 1 and ${csvData.length}.`, true);
+    return;
+  }
+  setWatchlistStatus("");
+  queueRowNavigation(requested - 1);
 }
 
 /* ─── Prev / Next navigation ─────────────────────────────── */
@@ -1570,6 +1636,15 @@ document.getElementById('prevRow').onclick=()=>{
 document.getElementById('nextRow').onclick=()=>{
   showNextRow();
 };
+document.getElementById('jumpToChartBtn').onclick=()=>{
+  jumpToChartNumber();
+};
+document.getElementById('jumpToChart').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    jumpToChartNumber();
+  }
+});
 
 function hasTypingFocus() {
   const el = document.activeElement;
