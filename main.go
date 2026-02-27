@@ -30,12 +30,13 @@ var (
 )
 
 var (
-	polygonAPIKey   string
-	fmpAPIKey       string
-	secAPIKey       string
-	marketauxAPIKey string
-	patternfolioURL string
-	listenPort      int
+	polygonAPIKey    string
+	fmpAPIKey        string
+	secAPIKey        string
+	marketauxAPIKey  string
+	marketauxEnabled bool
+	patternfolioURL  string
+	listenPort       int
 )
 
 var marketNewsLocation = func() *time.Location {
@@ -781,6 +782,7 @@ func rootHandler(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/html")
 	html := indexHTML
 	html = strings.ReplaceAll(html, "{{PATTERNFOLIO_URL}}", patternfolioURL)
+	html = strings.ReplaceAll(html, "{{MARKETAUX_ENABLED}}", strconv.FormatBool(marketauxEnabled))
 	fmt.Fprint(w, html)
 }
 
@@ -1494,6 +1496,7 @@ func chartHandler(w http.ResponseWriter, r *http.Request) {
 	html = strings.ReplaceAll(html, "{{SIGNAL_LABEL}}", strings.ToUpper(signal))
 	html = strings.ReplaceAll(html, "{{RESOLUTION}}", resolution)
 	html = strings.ReplaceAll(html, "{{PATTERNFOLIO_URL}}", patternfolioURL)
+	html = strings.ReplaceAll(html, "{{MARKETAUX_ENABLED}}", strconv.FormatBool(marketauxEnabled))
 	fmt.Fprint(w, html)
 }
 
@@ -1890,6 +1893,7 @@ func main() {
 	if marketauxAPIKey == "" {
 		marketauxAPIKey = strings.TrimSpace(os.Getenv("MARKETAUX_API_TOKEN"))
 	}
+	marketauxEnabled = marketauxAPIKey != ""
 	patternfolioURL = os.Getenv("PATTERNFOLIO_URL")
 	if patternfolioURL == "" {
 		patternfolioURL = "http://localhost:8082"

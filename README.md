@@ -16,7 +16,7 @@ go run .
 
 Default app URL: `http://localhost:8081`
 
-`MARKETAUX_API_KEY` enables the Marketaux Catalyst Radar panels (`/api/market-stats`) used in both pages.
+`MARKETAUX_API_KEY` is optional. When it is not set, the Marketaux Catalyst Radar panels (`/api/market-stats`) are hidden on both pages so the UI stays uncluttered.
 
 ## URL API For Deep Links
 

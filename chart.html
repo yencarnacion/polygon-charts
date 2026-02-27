@@ -248,7 +248,7 @@
         <p>Signal: <span class="signal-{{SIGNAL}}">{{SIGNAL_LABEL}}</span> | Resolution: {{RESOLUTION}} | Company: <span id="signal-company-name">Loading...</span></p>
         <button class="btn btn-primary" onclick="postToPatternfolio()">Post to Patternfolio</button>
       </div>
-      <section class="market-radar">
+      <section class="market-radar" data-marketaux-section>
         <div class="d-flex justify-content-between align-items-center gap-2 flex-wrap">
           <h4 class="mb-0">Catalyst Radar (Marketaux)</h4>
           <div id="signal-radar-updated" class="radar-updated"></div>
@@ -292,7 +292,7 @@
         <div class="col-auto"><input id="base-date" class="form-control" value="{{DATE}}" placeholder="Date"></div>
         <div class="col-auto"><button class="btn btn-primary" type="submit">Load</button></div>
       </form>
-      <section class="market-radar">
+      <section class="market-radar" data-marketaux-section>
         <div class="d-flex justify-content-between align-items-center gap-2 flex-wrap">
           <h4 class="mb-0">Catalyst Radar (Marketaux)</h4>
           <div id="base-radar-updated" class="radar-updated"></div>
@@ -363,6 +363,7 @@
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 <script>
 const patternfolioURL = "{{PATTERNFOLIO_URL}}";
+const marketauxEnabled = {{MARKETAUX_ENABLED}};
 // Signal Chart Logic
 let signalListenersAdded = false;
 let signalChart, signalCandleSeries, signalVolumeSeries, signalVwapSeries, signalSmaSeries;
@@ -372,6 +373,14 @@ let contextDailyChart, contextDailyCandleSeries, contextDailyVolumeSeries;
 let contextIntradayChart, contextIntradayCandleSeries, contextIntradayVolumeSeries, contextIntradayVwapSeries;
 let contextNews = [], contextFilings = [];
 const radarTables = {};
+
+function removeMarketauxSections() {
+  document.querySelectorAll("[data-marketaux-section]").forEach(el => el.remove());
+}
+if (!marketauxEnabled) {
+  removeMarketauxSections();
+}
+
 const nyTime = ts =>
   new Date(ts * 1000).toLocaleTimeString(
     'en-US',
@@ -590,6 +599,9 @@ function renderMarketRadar(prefix, data) {
 }
 
 async function displayMarketRadar(prefix, tickerValue, dateValue) {
+  if (!marketauxEnabled) {
+    return;
+  }
   try {
     const { data } = await axios.get('/api/market-stats', { params: { ticker: tickerValue, date: dateValue } });
     renderMarketRadar(prefix, data);
@@ -687,7 +699,9 @@ async function loadSignalChart() {
     }
     setSessionVisibleRange(signalChart, date);
     drawRthOpenLine(signalChart, document.getElementById('signal-chart'), date);
-    await displayMarketRadar('signal', ticker, date);
+    if (marketauxEnabled) {
+      await displayMarketRadar('signal', ticker, date);
+    }
     const metrics = data.metrics;
     let d = new Date(date);
     d.setDate(d.getDate() - 1);
@@ -1255,10 +1269,17 @@ function getNyTime(dateStr, h, m) {
   return new Date(epoch);
 }
 function setSessionVisibleRange(chart, dateStr) {
-  chart.timeScale().setVisibleRange({
-    from: getNyTime(dateStr, 7, 0).getTime() / 1000,
-    to: getNyTime(dateStr, 16, 0).getTime() / 1000
-  });
+  if (!chart || !dateStr) return false;
+  const from = getNyTime(dateStr, 7, 0).getTime() / 1000;
+  const to = getNyTime(dateStr, 16, 0).getTime() / 1000;
+  if (!Number.isFinite(from) || !Number.isFinite(to) || from >= to) return false;
+  try {
+    chart.timeScale().setVisibleRange({ from, to });
+    return true;
+  } catch (err) {
+    console.debug('[range] skip setVisibleRange', err?.message || err);
+    return false;
+  }
 }
 const nyHMFormatter = new Intl.DateTimeFormat('en-US', {
   timeZone: NY_TZ, hour12: false, hour: '2-digit', minute: '2-digit'
@@ -1453,10 +1474,11 @@ async function loadBaseChart(e, skipDefaultRow = false) {
     baseCandleSeries.setMarkers([]);
     setSessionVisibleRange(baseChart, baseDate);
     drawRthOpenLine(baseChart, document.getElementById('base-chart'), baseDate);
-    await Promise.all([
-      displayBaseExtra(baseTicker, baseDate),
-      displayMarketRadar('base', baseTicker, baseDate)
-    ]);
+    const pending = [displayBaseExtra(baseTicker, baseDate)];
+    if (marketauxEnabled) {
+      pending.push(displayMarketRadar('base', baseTicker, baseDate));
+    }
+    await Promise.all(pending);
     if (baseCsvData.length === 1 && baseCsvData[0].ticker.toUpperCase() !== baseTicker.toUpperCase() && !baseIsCsvUploaded) {
       baseCsvData = [];
       baseTable.setData([]);
