@@ -38,6 +38,14 @@ var (
 	listenPort      int
 )
 
+var marketNewsLocation = func() *time.Location {
+	loc, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		return time.UTC
+	}
+	return loc
+}()
+
 //go:embed index.html
 var indexHTML string
 
@@ -582,7 +590,7 @@ func parseMassiveNewsItem(raw map[string]interface{}) (NewsItem, bool) {
 		Title:     title,
 		Source:    source,
 		URL:       articleURL,
-		Published: published,
+		Published: normalizePublished(published),
 	}, true
 }
 
@@ -683,13 +691,84 @@ func nextDay(dateStr string) string {
 }
 
 func parsePublished(s string) time.Time {
-	if strings.Contains(s, "T") {
-		t, _ := time.Parse(time.RFC3339, s)
-		return t
-	} else {
-		t, _ := time.Parse("2006-01-02 15:04:05", s)
-		return t
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return time.Time{}
 	}
+
+	if unix, err := strconv.ParseInt(s, 10, 64); err == nil {
+		if len(s) >= 13 {
+			return time.UnixMilli(unix).UTC()
+		}
+		if len(s) >= 10 {
+			return time.Unix(unix, 0).UTC()
+		}
+	}
+
+	withZone := []string{
+		time.RFC3339Nano,
+		time.RFC3339,
+		"2006-01-02 15:04:05.999999999Z07:00",
+		"2006-01-02 15:04:05Z07:00",
+		"2006-01-02 15:04:05.999999999 -07:00",
+		"2006-01-02 15:04:05 -07:00",
+		"2006-01-02 15:04:05.999999999 -0700",
+		"2006-01-02 15:04:05 -0700",
+	}
+	for _, layout := range withZone {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t.UTC()
+		}
+	}
+
+	withoutZone := []string{
+		"2006-01-02 15:04:05.999999999",
+		"2006-01-02 15:04:05",
+		"2006-01-02 15:04",
+		"2006-01-02T15:04:05.999999999",
+		"2006-01-02T15:04:05",
+		"2006-01-02T15:04",
+		"2006-01-02",
+	}
+	for _, layout := range withoutZone {
+		if t, err := time.ParseInLocation(layout, s, marketNewsLocation); err == nil {
+			return t.UTC()
+		}
+	}
+
+	return time.Time{}
+}
+
+func normalizePublished(s string) string {
+	raw := strings.TrimSpace(s)
+	if raw == "" {
+		return ""
+	}
+	t := parsePublished(raw)
+	if t.IsZero() {
+		return raw
+	}
+	return t.UTC().Format(time.RFC3339)
+}
+
+func isNewsNewer(a, b NewsItem) bool {
+	ta := parsePublished(a.Published)
+	tb := parsePublished(b.Published)
+
+	switch {
+	case ta.After(tb):
+		return true
+	case tb.After(ta):
+		return false
+	}
+
+	if a.Published != b.Published {
+		return a.Published > b.Published
+	}
+	if a.Title != b.Title {
+		return a.Title < b.Title
+	}
+	return a.URL < b.URL
 }
 
 func openBrowser(u string) {
@@ -1019,7 +1098,7 @@ func extraHandler(w http.ResponseWriter, r *http.Request) {
 			Title:     title,
 			Source:    site,
 			URL:       url,
-			Published: pub,
+			Published: normalizePublished(pub),
 		})
 	}
 	filings, _ := querySECFilings(ticker, dateStr)
@@ -1069,7 +1148,7 @@ func extraHandler(w http.ResponseWriter, r *http.Request) {
 					Title:     title,
 					Source:    site,
 					URL:       url,
-					Published: pub,
+					Published: normalizePublished(pub),
 				})
 			}
 			filings, _ := querySECFilings(ticker, priorStr)
@@ -1089,9 +1168,7 @@ func extraHandler(w http.ResponseWriter, r *http.Request) {
 		uniqueNews = append(uniqueNews, n)
 	}
 	sort.Slice(uniqueNews, func(i, j int) bool {
-		ti := parsePublished(uniqueNews[i].Published)
-		tj := parsePublished(uniqueNews[j].Published)
-		return ti.After(tj)
+		return isNewsNewer(uniqueNews[i], uniqueNews[j])
 	})
 	// Sort filings by filedAt desc
 	sort.Slice(allFilings, func(i, j int) bool {
@@ -1627,7 +1704,7 @@ func chartDataHandler(w http.ResponseWriter, r *http.Request) {
 		if !ok {
 			continue
 		}
-		allNewsItems = append(allNewsItems, NewsItem{Title: title, Source: site, URL: url, Published: pub})
+		allNewsItems = append(allNewsItems, NewsItem{Title: title, Source: site, URL: url, Published: normalizePublished(pub)})
 	}
 	filings, _ := querySECFilings(symbol, dateStr)
 	allFilings = append(allFilings, filings...)
@@ -1670,7 +1747,7 @@ func chartDataHandler(w http.ResponseWriter, r *http.Request) {
 			if !ok {
 				continue
 			}
-			allNewsItems = append(allNewsItems, NewsItem{Title: title, Source: site, URL: url, Published: pub})
+			allNewsItems = append(allNewsItems, NewsItem{Title: title, Source: site, URL: url, Published: normalizePublished(pub)})
 		}
 		filingsPrior, _ := querySECFilings(symbol, priorStr)
 		allFilings = append(allFilings, filingsPrior...)
@@ -1686,9 +1763,7 @@ func chartDataHandler(w http.ResponseWriter, r *http.Request) {
 		uniqueNews = append(uniqueNews, n)
 	}
 	sort.Slice(uniqueNews, func(i, j int) bool {
-		ti := parsePublished(uniqueNews[i].Published)
-		tj := parsePublished(uniqueNews[j].Published)
-		return ti.After(tj)
+		return isNewsNewer(uniqueNews[i], uniqueNews[j])
 	})
 	// Sort filings
 	sort.Slice(allFilings, func(i, j int) bool {
