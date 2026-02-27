@@ -424,7 +424,7 @@ func buildTickerRadar(m15, m60, session, trend marketauxEntityStat) map[string]i
 
 func queryPolygon(sym string, mult int, span, from, to string) ([]polygonBar, error) {
 	url := fmt.Sprintf(
-		"https://api.polygon.io/v2/aggs/ticker/%s/range/%d/%s/%s/%s?adjusted=true&sort=asc&apiKey=%s",
+		"https://api.massive.com/v2/aggs/ticker/%s/range/%d/%s/%s/%s?adjusted=true&sort=asc&apiKey=%s",
 		sym, mult, span, from, to, polygonAPIKey)
 	resp, err := http.Get(url)
 	if err != nil {
@@ -442,7 +442,7 @@ func queryPolygon(sym string, mult int, span, from, to string) ([]polygonBar, er
 }
 
 func queryPolygonTickerDetails(ticker string) (*PolygonTickerDetails, error) {
-	url := fmt.Sprintf("https://api.polygon.io/v3/reference/tickers/%s?apiKey=%s", ticker, polygonAPIKey)
+	url := fmt.Sprintf("https://api.massive.com/v3/reference/tickers/%s?apiKey=%s", ticker, polygonAPIKey)
 	resp, err := http.Get(url)
 	if err != nil {
 		return nil, err
@@ -492,17 +492,26 @@ func queryFMPProfile(symbol string) ([]map[string]interface{}, error) {
 	return profile, nil
 }
 
-func queryPolygonNews(ticker, dateStr string) ([]map[string]interface{}, error) {
+// queryMassiveBenzingaNews uses Massive real-time Benzinga news:
+// https://massive.com/docs/rest/partners/benzinga/news
+func queryMassiveBenzingaNews(ticker, dateStr string) ([]map[string]interface{}, error) {
 	nextD := nextDay(dateStr)
-	url := fmt.Sprintf("https://api.polygon.io/v2/reference/news?ticker=%s&published_utc.gte=%s&published_utc.lt=%s&limit=50&sort=published_utc.desc&apiKey=%s",
-		ticker, dateStr, nextD, polygonAPIKey)
-	resp, err := http.Get(url)
+	params := url.Values{}
+	params.Set("tickers", strings.ToUpper(strings.TrimSpace(ticker)))
+	params.Set("published.gte", dateStr+"T00:00:00Z")
+	params.Set("published.lt", nextD+"T00:00:00Z")
+	params.Set("limit", "50")
+	params.Set("sort", "published")
+	params.Set("order", "desc")
+	params.Set("apiKey", polygonAPIKey)
+	endpoint := "https://api.massive.com/benzinga/v2/news?" + params.Encode()
+	resp, err := http.Get(endpoint)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("Polygon News: %s", resp.Status)
+		return nil, fmt.Errorf("Massive Benzinga News: %s", resp.Status)
 	}
 	var pr struct {
 		Results []map[string]interface{} `json:"results"`
@@ -529,6 +538,106 @@ func queryFMPNews(ticker, dateStr string) ([]map[string]interface{}, error) {
 		return nil, err
 	}
 	return news, nil
+}
+
+func firstNonEmptyString(values map[string]interface{}, keys ...string) string {
+	for _, key := range keys {
+		if val, ok := values[key]; ok {
+			s := valueAsString(val)
+			if s != "" {
+				return s
+			}
+		}
+	}
+	return ""
+}
+
+func parseMassiveNewsItem(raw map[string]interface{}) (NewsItem, bool) {
+	title := firstNonEmptyString(raw, "title", "headline")
+	if title == "" {
+		return NewsItem{}, false
+	}
+
+	articleURL := firstNonEmptyString(raw, "article_url", "url", "amp_url")
+	if articleURL == "" {
+		return NewsItem{}, false
+	}
+
+	published := firstNonEmptyString(raw, "published", "published_utc", "updated", "created")
+	if published == "" {
+		return NewsItem{}, false
+	}
+
+	source := firstNonEmptyString(raw, "source")
+	if source == "" {
+		if publisher, ok := raw["publisher"].(map[string]interface{}); ok {
+			source = firstNonEmptyString(publisher, "name", "title")
+		}
+	}
+	if source == "" {
+		source = firstNonEmptyString(raw, "author")
+	}
+
+	return NewsItem{
+		Title:     title,
+		Source:    source,
+		URL:       articleURL,
+		Published: published,
+	}, true
+}
+
+func appendMassiveNewsItems(dst []NewsItem, rawItems []map[string]interface{}) []NewsItem {
+	for _, raw := range rawItems {
+		if item, ok := parseMassiveNewsItem(raw); ok {
+			dst = append(dst, item)
+		}
+	}
+	return dst
+}
+
+func isClassActionLawsuitNews(item NewsItem) bool {
+	title := strings.ToLower(strings.TrimSpace(item.Title))
+	if title == "" {
+		return false
+	}
+
+	strongPhrases := []string{
+		"class action",
+		"class action lawsuit",
+		"securities fraud lawsuit",
+		"shareholder alert",
+		"investor alert",
+		"lead plaintiff",
+		"investor counsel",
+	}
+	for _, phrase := range strongPhrases {
+		if strings.Contains(title, phrase) {
+			return true
+		}
+	}
+
+	if strings.Contains(title, "lawsuit") {
+		if strings.Contains(title, "investor") || strings.Contains(title, "shareholder") || strings.Contains(title, "law firm") {
+			return true
+		}
+	}
+
+	if strings.Contains(title, "law firm") && (strings.Contains(title, "investor") || strings.Contains(title, "shareholder")) {
+		return true
+	}
+
+	return false
+}
+
+func filterTradeableNews(items []NewsItem) []NewsItem {
+	out := make([]NewsItem, 0, len(items))
+	for _, item := range items {
+		if isClassActionLawsuitNews(item) {
+			continue
+		}
+		out = append(out, item)
+	}
+	return out
 }
 
 func querySECFilings(ticker, dateStr string) ([]map[string]interface{}, error) {
@@ -870,45 +979,8 @@ func extraHandler(w http.ResponseWriter, r *http.Request) {
 	var allFilings []map[string]interface{}
 	var profile []map[string]interface{}
 	// Fetch for current day
-	pNews, _ := queryPolygonNews(ticker, dateStr)
-	for _, p := range pNews {
-		val, exists := p["title"]
-		if !exists || val == nil {
-			continue
-		}
-		title, ok := val.(string)
-		if !ok {
-			continue
-		}
-		val, exists = p["url"]
-		if !exists || val == nil {
-			continue
-		}
-		url, ok := val.(string)
-		if !ok {
-			continue
-		}
-		val, exists = p["published_utc"]
-		if !exists || val == nil {
-			continue
-		}
-		pub, ok := val.(string)
-		if !ok {
-			continue
-		}
-		source := ""
-		if publisher, ok := p["publisher"].(map[string]interface{}); ok {
-			if name, ok := publisher["name"].(string); ok {
-				source = name
-			}
-		}
-		allNewsItems = append(allNewsItems, NewsItem{
-			Title:     title,
-			Source:    source,
-			URL:       url,
-			Published: pub,
-		})
-	}
+	pNews, _ := queryMassiveBenzingaNews(ticker, dateStr)
+	allNewsItems = appendMassiveNewsItems(allNewsItems, pNews)
 	fNews, _ := queryFMPNews(ticker, dateStr)
 	for _, f := range fNews {
 		val, exists := f["title"]
@@ -957,45 +1029,8 @@ func extraHandler(w http.ResponseWriter, r *http.Request) {
 	if days == 2 {
 		priorStr, err := getPriorTradingDate(ticker, dateStr)
 		if err == nil {
-			pNews, _ = queryPolygonNews(ticker, priorStr)
-			for _, p := range pNews {
-				val, exists := p["title"]
-				if !exists || val == nil {
-					continue
-				}
-				title, ok := val.(string)
-				if !ok {
-					continue
-				}
-				val, exists = p["url"]
-				if !exists || val == nil {
-					continue
-				}
-				url, ok := val.(string)
-				if !ok {
-					continue
-				}
-				val, exists = p["published_utc"]
-				if !exists || val == nil {
-					continue
-				}
-				pub, ok := val.(string)
-				if !ok {
-					continue
-				}
-				source := ""
-				if publisher, ok := p["publisher"].(map[string]interface{}); ok {
-					if name, ok := publisher["name"].(string); ok {
-						source = name
-					}
-				}
-				allNewsItems = append(allNewsItems, NewsItem{
-					Title:     title,
-					Source:    source,
-					URL:       url,
-					Published: pub,
-				})
-			}
+			pNews, _ = queryMassiveBenzingaNews(ticker, priorStr)
+			allNewsItems = appendMassiveNewsItems(allNewsItems, pNews)
 			fNews, _ = queryFMPNews(ticker, priorStr)
 			for _, f := range fNews {
 				val, exists := f["title"]
@@ -1044,6 +1079,7 @@ func extraHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	// Deduplicate news by URL
+	allNewsItems = filterTradeableNews(allNewsItems)
 	uniqueMap := make(map[string]NewsItem)
 	for _, n := range allNewsItems {
 		uniqueMap[n.URL] = n
@@ -1555,40 +1591,8 @@ func chartDataHandler(w http.ResponseWriter, r *http.Request) {
 	var allNewsItems []NewsItem
 	var allFilings []map[string]interface{}
 	// Fetch current day
-	pNews, _ := queryPolygonNews(symbol, dateStr)
-	for _, p := range pNews {
-		val, exists := p["title"]
-		if !exists || val == nil {
-			continue
-		}
-		title, ok := val.(string)
-		if !ok {
-			continue
-		}
-		val, exists = p["url"]
-		if !exists || val == nil {
-			continue
-		}
-		url, ok := val.(string)
-		if !ok {
-			continue
-		}
-		val, exists = p["published_utc"]
-		if !exists || val == nil {
-			continue
-		}
-		pub, ok := val.(string)
-		if !ok {
-			continue
-		}
-		source := ""
-		if publisher, ok := p["publisher"].(map[string]interface{}); ok {
-			if name, ok := publisher["name"].(string); ok {
-				source = name
-			}
-		}
-		allNewsItems = append(allNewsItems, NewsItem{Title: title, Source: source, URL: url, Published: pub})
-	}
+	pNews, _ := queryMassiveBenzingaNews(symbol, dateStr)
+	allNewsItems = appendMassiveNewsItems(allNewsItems, pNews)
 	fNews, _ := queryFMPNews(symbol, dateStr)
 	for _, f := range fNews {
 		val, exists := f["title"]
@@ -1630,40 +1634,8 @@ func chartDataHandler(w http.ResponseWriter, r *http.Request) {
 	// Fetch prior day
 	priorStr, err := getPriorTradingDate(symbol, dateStr)
 	if err == nil {
-		pNewsPrior, _ := queryPolygonNews(symbol, priorStr)
-		for _, p := range pNewsPrior {
-			val, exists := p["title"]
-			if !exists || val == nil {
-				continue
-			}
-			title, ok := val.(string)
-			if !ok {
-				continue
-			}
-			val, exists = p["url"]
-			if !exists || val == nil {
-				continue
-			}
-			url, ok := val.(string)
-			if !ok {
-				continue
-			}
-			val, exists = p["published_utc"]
-			if !exists || val == nil {
-				continue
-			}
-			pub, ok := val.(string)
-			if !ok {
-				continue
-			}
-			source := ""
-			if publisher, ok := p["publisher"].(map[string]interface{}); ok {
-				if name, ok := publisher["name"].(string); ok {
-					source = name
-				}
-			}
-			allNewsItems = append(allNewsItems, NewsItem{Title: title, Source: source, URL: url, Published: pub})
-		}
+		pNewsPrior, _ := queryMassiveBenzingaNews(symbol, priorStr)
+		allNewsItems = appendMassiveNewsItems(allNewsItems, pNewsPrior)
 		fNewsPrior, _ := queryFMPNews(symbol, priorStr)
 		for _, f := range fNewsPrior {
 			val, exists := f["title"]
@@ -1704,6 +1676,7 @@ func chartDataHandler(w http.ResponseWriter, r *http.Request) {
 		allFilings = append(allFilings, filingsPrior...)
 	}
 	// Deduplicate and sort news
+	allNewsItems = filterTradeableNews(allNewsItems)
 	uniqueMap := make(map[string]NewsItem)
 	for _, n := range allNewsItems {
 		uniqueMap[n.URL] = n
