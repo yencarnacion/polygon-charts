@@ -224,6 +224,14 @@
       font-size:12px; background:rgba(7,14,24,0.7);
       padding:2px 4px; border-radius:3px; color:var(--warning); z-index:2;
     }
+    .watchlist-hint {
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
+    #watchlistStatus {
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
   </style>
 </head>
 <body>
@@ -251,6 +259,12 @@
         <div class="col-auto"><input id="tradeDate" class="form-control" placeholder="Date"></div>
         <div class="col-auto"><button class="btn btn-primary" type="submit">Load</button></div>
       </form>
+      <div class="d-flex align-items-center gap-2 flex-wrap mt-3">
+        <input id="watchlistFile" type="file" accept=".yaml,.yml,text/yaml,text/x-yaml" class="form-control" style="max-width:280px">
+        <button id="loadWatchlist" class="btn btn-outline-light btn-sm">Load Watchlist YAML</button>
+        <span class="watchlist-hint">Shortcuts: Space/right/down = next, B/left/up = previous.</span>
+        <span id="watchlistStatus" class="ms-auto"></span>
+      </div>
       <div class="d-flex align-items-center gap-2 flex-wrap mt-3">
         <input id="csvFile" type="file" accept=".csv,text/csv" class="form-control" style="max-width:260px">
         <input id="newColumn" class="form-control" placeholder="New column name" style="max-width:200px">
@@ -319,6 +333,7 @@
 <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
 <script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.0.0/dist/lightweight-charts.standalone.production.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/tabulator-tables@5.4.4/dist/js/tabulator.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 <script>
@@ -343,6 +358,14 @@ let contextIntradayVwapSeries = null;
 let contextNews = [];
 let contextFilings = [];
 let contextKey = "";
+let watchlistMode = false;
+
+function setWatchlistStatus(message, isError = false) {
+  const el = document.getElementById("watchlistStatus");
+  if (!el) return;
+  el.textContent = message || "";
+  el.style.color = isError ? "var(--negative)" : "var(--muted)";
+}
 
 function removeMarketauxSections() {
   document.querySelectorAll("[data-marketaux-section]").forEach(el => el.remove());
@@ -1020,9 +1043,17 @@ async function load(e, skipDefaultRow = false){
     console.debug('[load] received',data.candles.length,'bars');
     if(!data.candles.length){
       console.warn('[load] no candles',ticker,date,timeframe);
-      alert('No RTH data for this date; try the prior trading day.');
+      if (watchlistMode) {
+        setWatchlistStatus(`No RTH data for ${ticker.toUpperCase()} on ${date}.`, true);
+      } else {
+        alert('No RTH data for this date; try the prior trading day.');
+      }
+    } else if (watchlistMode) {
+      setWatchlistStatus(`Viewing ${ticker.toUpperCase()} on ${date}.`);
     }
-    await fetchPriorDayClose(ticker,date);
+    if (!watchlistMode) {
+      await fetchPriorDayClose(ticker,date);
+    }
     // Determine multMin for aggregation
     let multMin;
     switch(timeframe) {
@@ -1113,11 +1144,25 @@ async function load(e, skipDefaultRow = false){
     candleSeries.setMarkers([]);
     setSessionVisibleRange(chart, date);
     drawRthOpenLine(chart, document.getElementById('chart'), date);
-    const pending = [displayExtra(ticker, date)];
-    if (marketauxEnabled) {
-      pending.push(displayMarketRadar(ticker, date));
+    if (watchlistMode) {
+      currentNews = [];
+      currentFilings = [];
+      document.getElementById("news-sheet").innerHTML = "";
+      document.getElementById("filings-sheet").innerHTML = "";
+      document.getElementById("profile-container").innerHTML = "";
+      document.getElementById("context-news-sheet").innerHTML = "";
+      document.getElementById("context-filings-sheet").innerHTML = "";
+      document.getElementById("context-profile-container").innerHTML = "";
+      if (marketauxEnabled) {
+        renderMarketRadarUnavailable("Hidden in watchlist mode for speed");
+      }
+    } else {
+      const pending = [displayExtra(ticker, date)];
+      if (marketauxEnabled) {
+        pending.push(displayMarketRadar(ticker, date));
+      }
+      await Promise.all(pending);
     }
-    await Promise.all(pending);
     if (csvData.length === 1 && csvData[0].ticker.toUpperCase() !== ticker.toUpperCase() && !isCsvUploaded) {
       csvData = [];
       table.setData([]);
@@ -1129,7 +1174,7 @@ async function load(e, skipDefaultRow = false){
         volumeSeries.setData([]);
         vwapSeries.setData([]);
         smaSeries.setData([]);
-        if (contextTabActive) {
+        if (contextTabActive && !watchlistMode) {
           await loadContextTab(true);
         }
         return;
@@ -1155,11 +1200,15 @@ async function load(e, skipDefaultRow = false){
         showSignalOnChart(csvData[currentRow]);
       });
     }
-    if (contextTabActive) {
+    if (contextTabActive && !watchlistMode) {
       await loadContextTab(true);
     }
   }catch(err){
     console.error('[load] error',err);
+    if (watchlistMode) {
+      setWatchlistStatus(`Error loading ${ticker.toUpperCase()}: ${err.response?.data || err.message || err}`, true);
+      return;
+    }
     alert('Error: '+(err.response?.data||err));
   }
 }
@@ -1206,6 +1255,10 @@ const NEW_COLUMNS=[
 
 /* Update table view to show only current row */
 function updateTableView(){
+  if (!csvData.length) {
+    document.getElementById('row-indicator').textContent = '0/0';
+    return;
+  }
   table.setFilter("__row","=",currentRow);
   table.getColumns().forEach(col=>{
     const field=col.getField();
@@ -1248,6 +1301,85 @@ function setupTable(){
 }
 
 setupTable();
+
+function parseWatchlistSymbols(rawYaml) {
+  let parsed;
+  try {
+    if (typeof jsyaml !== "undefined" && typeof jsyaml.load === "function") {
+      parsed = jsyaml.load(rawYaml);
+    }
+  } catch (err) {
+    throw new Error(`Invalid YAML: ${err.message || err}`);
+  }
+  const watchlist = parsed && Array.isArray(parsed.watchlist) ? parsed.watchlist : [];
+  const seen = new Set();
+  const symbols = [];
+  for (const entry of watchlist) {
+    let symbol = "";
+    if (typeof entry === "string") {
+      symbol = entry;
+    } else if (entry && typeof entry === "object") {
+      symbol = entry.symbol || entry.ticker || "";
+    }
+    const clean = String(symbol || "").trim().toUpperCase();
+    if (!clean || !/^[A-Z0-9.\-]+$/.test(clean) || seen.has(clean)) {
+      continue;
+    }
+    seen.add(clean);
+    symbols.push(clean);
+  }
+  return symbols;
+}
+
+async function loadWatchlistYaml() {
+  const file = document.getElementById("watchlistFile").files[0];
+  const date = document.getElementById("tradeDate").value;
+  if (!file) {
+    setWatchlistStatus("Select a watchlist YAML file first.", true);
+    return;
+  }
+  if (!date) {
+    setWatchlistStatus("Pick a trade date first.", true);
+    return;
+  }
+  try {
+    const text = await file.text();
+    const symbols = parseWatchlistSymbols(text);
+    if (!symbols.length) {
+      setWatchlistStatus("No valid symbols found in watchlist.yaml", true);
+      return;
+    }
+    watchlistMode = true;
+    isCsvUploaded = true;
+    document.getElementById("timeframe").value = "1m";
+    csvData = symbols.map((ticker, idx) => ({
+      __row: idx,
+      ticker,
+      time: "0930",
+      signal: "buy"
+    }));
+    table.clearFilter();
+    table.setColumns([
+      { title: "#", formatter: "rownum", hozAlign: "center", width: 40, frozen: true },
+      { title: "TICKER", field: "ticker", minWidth: 120, headerSort: false, headerTooltip: true }
+    ]);
+    await table.setData(csvData);
+    currentRow = 0;
+    updateTableView();
+    setWatchlistStatus(`Loaded ${csvData.length} symbols for ${date}.`);
+    await showSignalOnChart(csvData[currentRow]);
+  } catch (err) {
+    console.error("[watchlist] failed to load", err);
+    setWatchlistStatus(`Failed to load watchlist: ${err.message || err}`, true);
+  }
+}
+
+document.getElementById("loadWatchlist").addEventListener("click", loadWatchlistYaml);
+document.getElementById("watchlistFile").addEventListener("change", () => {
+  const f = document.getElementById("watchlistFile").files[0];
+  if (!f) return;
+  setWatchlistStatus(`Selected ${f.name}.`);
+});
 
 /* ─── Fetch extended hours data for pre/after market ────── */
 async function fetchExtendedData(ticker, date){
@@ -1312,6 +1444,7 @@ async function fetchFloat(ticker) {
 
 /* ─── Calculate metrics for a CSV row (async for fetches) ── */
 async function calculateMetricsForRow(row){
+  if (watchlistMode) return;
   if(!cachedMinCandles.length) return;
   const rowTime=row.time;
   if(!rowTime) return;
@@ -1365,6 +1498,8 @@ async function calculateMetricsForRow(row){
 
 /* ─── CSV upload handler ─────────────────────────────────── */
 document.getElementById('csvFile').addEventListener('change',async e=>{
+  watchlistMode = false;
+  setWatchlistStatus("");
   isCsvUploaded = true;
   const file=e.target.files[0]; if(!file) return;
   const text=await file.text();
@@ -1405,22 +1540,57 @@ document.getElementById('addColumn').onclick=()=>{
   document.getElementById('newColumn').value="";
 };
 
-/* ─── Prev / Next navigation ─────────────────────────────── */
-document.getElementById('prevRow').onclick=()=>{
+function showPrevRow() {
   if(currentRow>0){
     currentRow--;
     console.debug('[nav] prev →',currentRow,csvData[currentRow]);
-    updateTableView(); showSignalOnChart(csvData[currentRow]);
+    updateTableView();
+    showSignalOnChart(csvData[currentRow]);
+    return true;
   }
-};
+  return false;
+}
 
-document.getElementById('nextRow').onclick=()=>{
+function showNextRow() {
   if(currentRow<csvData.length-1){
     currentRow++;
     console.debug('[nav] next →',currentRow,csvData[currentRow]);
-    updateTableView(); showSignalOnChart(csvData[currentRow]);
+    updateTableView();
+    showSignalOnChart(csvData[currentRow]);
+    return true;
   }
+  return false;
+}
+
+/* ─── Prev / Next navigation ─────────────────────────────── */
+document.getElementById('prevRow').onclick=()=>{
+  showPrevRow();
 };
+
+document.getElementById('nextRow').onclick=()=>{
+  showNextRow();
+};
+
+function hasTypingFocus() {
+  const el = document.activeElement;
+  if (!el) return false;
+  const tag = (el.tagName || "").toUpperCase();
+  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || el.isContentEditable;
+}
+
+document.addEventListener('keydown', (e) => {
+  if (!csvData.length || hasTypingFocus()) return;
+  const key = (e.key || '').toLowerCase();
+  if (e.code === 'Space' || e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+    e.preventDefault();
+    showNextRow();
+    return;
+  }
+  if (key === 'b' || e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    showPrevRow();
+  }
+});
 
 /* ─── Show signal on chart ───────────────────────────────── */
 function combineDateAndTime(dateStr,HHMM){
@@ -1436,8 +1606,10 @@ async function showSignalOnChart(row){
     document.getElementById('ticker').value = row.ticker.toUpperCase();
     await load(null, true); // Load with skipDefaultRow = true to avoid recursion
   }
-  await calculateMetricsForRow(row); // enrich row metrics (async)
-  table.updateData([row]); // show updates in grid
+  if (!watchlistMode) {
+    await calculateMetricsForRow(row); // enrich row metrics (async)
+    table.updateData([row]); // show updates in grid
+  }
   const hhmm = String(row.time).replace(':','').padStart(4,'0');
   const ts = combineDateAndTime(document.getElementById('tradeDate').value, hhmm);
   const isBuy = row.signal.toLowerCase() === "buy";
