@@ -259,6 +259,11 @@
         <div class="col-auto"><input id="tradeDate" class="form-control" placeholder="Date"></div>
         <div class="col-auto"><button class="btn btn-primary" type="submit">Load</button></div>
       </form>
+      <div class="d-flex align-items-center gap-2 flex-wrap mt-2">
+        <span class="watchlist-hint">Share Link:</span>
+        <a id="openChartLink" href="#" target="_blank" rel="noopener noreferrer" class="watchlist-hint"></a>
+        <input id="openChartLinkText" class="form-control form-control-sm" readonly style="max-width:560px" aria-label="Open chart share link">
+      </div>
       <div class="d-flex align-items-center gap-2 flex-wrap mt-3">
         <input id="watchlistFile" type="file" accept=".yaml,.yml,text/yaml,text/x-yaml" class="form-control" style="max-width:280px">
         <button id="loadWatchlist" class="btn btn-outline-light btn-sm">Load Watchlist YAML</button>
@@ -375,6 +380,34 @@ function isNetworkError(err) {
   if (!err) return false;
   const msg = String(err.message || "");
   return (!err.response && (err.code === "ERR_NETWORK" || /network error/i.test(msg)));
+}
+
+function buildOpenChartUrl(ticker, date) {
+  const t = String(ticker || "").trim().toUpperCase();
+  const d = String(date || "").trim();
+  if (!t || !/^\d{4}-\d{2}-\d{2}$/.test(d)) {
+    return "";
+  }
+  const base = window.location.origin || "http://localhost:8081";
+  return `${base}/api/open-chart/${encodeURIComponent(t)}/${encodeURIComponent(d)}`;
+}
+
+function updateOpenChartLink(tickerOverride = "") {
+  const ticker = String(tickerOverride || document.getElementById("ticker")?.value || "").trim().toUpperCase();
+  const date = String(document.getElementById("tradeDate")?.value || "").trim();
+  const url = buildOpenChartUrl(ticker, date);
+  const linkEl = document.getElementById("openChartLink");
+  const textEl = document.getElementById("openChartLinkText");
+  if (!linkEl || !textEl) return;
+  if (!url) {
+    linkEl.textContent = "";
+    linkEl.removeAttribute("href");
+    textEl.value = "";
+    return;
+  }
+  linkEl.href = url;
+  linkEl.textContent = url;
+  textEl.value = url;
 }
 
 function removeMarketauxSections() {
@@ -1048,6 +1081,7 @@ async function load(e, skipDefaultRow = false){
   contextKey = "";
   console.debug('[load] requesting',{ticker,timeframe,date});
   if(!ticker||!timeframe||!date){alert('Fill all fields');return;}
+  updateOpenChartLink(ticker);
   try{
     const {data}=await axios.get('/api/candles',{params:{ticker,timeframe,date}});
     console.debug('[load] received',data.candles.length,'bars');
@@ -1685,6 +1719,7 @@ async function showSignalOnChart(row){
     await calculateMetricsForRow(row); // enrich row metrics (async)
     table.updateData([row]); // show updates in grid
   }
+  updateOpenChartLink(row.ticker);
   const hhmm = String(row.time).replace(':','').padStart(4,'0');
   const ts = combineDateAndTime(document.getElementById('tradeDate').value, hhmm);
   const isBuy = row.signal.toLowerCase() === "buy";
@@ -1881,6 +1916,11 @@ window.addEventListener('resize', () => {
     }
   }
 });
+
+document.getElementById('ticker').addEventListener('input', () => updateOpenChartLink());
+document.getElementById('tradeDate').addEventListener('change', () => updateOpenChartLink());
+document.getElementById('tradeDate').addEventListener('input', () => updateOpenChartLink());
+updateOpenChartLink();
 </script>
 </body>
 </html>
