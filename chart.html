@@ -367,6 +367,14 @@ const marketauxEnabled = {{MARKETAUX_ENABLED}};
 // Signal Chart Logic
 let signalListenersAdded = false;
 let signalChart, signalCandleSeries, signalVolumeSeries, signalVwapSeries, signalSmaSeries;
+let signalKeyListenerAdded = false;
+let signalStepModeEnabled = false;
+let signalRevealCandles = [];
+let signalRevealVolume = [];
+let signalRevealVwap = [];
+let signalRevealSma = [];
+let signalVisibleCandles = 0;
+let signalMarker = null;
 let contextListenersAdded = false;
 let contextLoaded = false;
 let contextDailyChart, contextDailyCandleSeries, contextDailyVolumeSeries;
@@ -416,6 +424,46 @@ signalChart.timeScale().applyOptions({ tickMarkFormatter: nyTime }); // ★ axis
   signalChart.priceScale('vol').applyOptions({ scaleMargins: { top: 0.75, bottom: 0 } });
   signalVwapSeries = signalChart.addLineSeries({ color: '#ffd166', lineWidth: 2 });
   signalSmaSeries = signalChart.addLineSeries({ color: '#5fb3ff', lineWidth: 2 });
+}
+
+function hasTypingFocus() {
+  const el = document.activeElement;
+  if (!el) return false;
+  const tag = (el.tagName || "").toUpperCase();
+  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || el.isContentEditable;
+}
+
+function isSignalTabActive() {
+  const signalTab = document.getElementById('signal-tab');
+  return !!(signalTab && signalTab.classList.contains('active'));
+}
+
+function applySignalRevealData(visibleCount) {
+  if (!signalStepModeEnabled || !signalRevealCandles.length) return;
+  const nextCount = Math.max(1, Math.min(visibleCount, signalRevealCandles.length));
+  signalVisibleCandles = nextCount;
+  const cutoffTime = signalRevealCandles[nextCount - 1].time;
+  signalCandleSeries.setData(signalRevealCandles.slice(0, nextCount));
+  signalVolumeSeries.setData(signalRevealVolume.filter(v => v.time <= cutoffTime));
+  signalVwapSeries.setData(signalRevealVwap.filter(v => v.time <= cutoffTime));
+  signalSmaSeries.setData(signalRevealSma.filter(v => v.time <= cutoffTime));
+  if (signalMarker && signalMarker.time <= cutoffTime) {
+    signalCandleSeries.setMarkers([signalMarker]);
+  } else {
+    signalCandleSeries.setMarkers([]);
+  }
+}
+
+function setupSignalKeyNavigation() {
+  if (signalKeyListenerAdded) return;
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'ArrowRight') return;
+    if (!signalStepModeEnabled || !isSignalTabActive() || hasTypingFocus()) return;
+    if (signalVisibleCandles >= signalRevealCandles.length) return;
+    e.preventDefault();
+    applySignalRevealData(signalVisibleCandles + 1);
+  });
+  signalKeyListenerAdded = true;
 }
 
 const date = "{{DATE}}";
@@ -665,34 +713,71 @@ async function fetchFloat(ticker) {
 async function loadSignalChart() {
   try {
     initSignalChart();
+    setupSignalKeyNavigation();
     const requestParams = { ticker, resolution: timeframe, date };
     if (hasSignalTime) {
       requestParams.time = timeStr;
     }
     const { data } = await axios.get('/api/chart-data', { params: requestParams });
+    let plottedCandles = data.candles || [];
+    let plottedVolume = data.volume || [];
+    let plottedVwap = data.vwap || [];
+    let plottedSma = data.sma || [];
+    if (hasSignalTime) {
+      try {
+        const { data: fullSessionData } = await axios.get('/api/candles', { params: { ticker, timeframe, date } });
+        if (Array.isArray(fullSessionData.candles) && fullSessionData.candles.length > 0) {
+          plottedCandles = fullSessionData.candles;
+          plottedVolume = fullSessionData.volume || [];
+          plottedVwap = fullSessionData.vwap || [];
+          plottedSma = fullSessionData.sma || [];
+        }
+      } catch (fullErr) {
+        console.warn('[loadSignalChart] full-session fetch failed, falling back to chart-data payload', fullErr);
+      }
+    }
     const profile = data.profile || {};
     const companyNameEl = document.getElementById('signal-company-name');
     if (companyNameEl) {
       companyNameEl.textContent = profile.companyName || profile.name || 'N/A';
     }
-    signalCandleSeries.setData(data.candles);
-    signalVolumeSeries.setData(data.volume);
-    signalVwapSeries.setData(data.vwap);
-    signalSmaSeries.setData(data.sma);
+    signalCandleSeries.setData(plottedCandles);
+    signalVolumeSeries.setData(plottedVolume);
+    signalVwapSeries.setData(plottedVwap);
+    signalSmaSeries.setData(plottedSma);
+    signalStepModeEnabled = false;
+    signalRevealCandles = [];
+    signalRevealVolume = [];
+    signalRevealVwap = [];
+    signalRevealSma = [];
+    signalVisibleCandles = 0;
+    signalMarker = null;
     if (hasSignalTime) {
       const hhmm = String(timeStr).replace(':','').padStart(4,'0');
       const ts = combineDateAndTime(date, hhmm) / 1000;
       const isBuy = signal === "buy";
       if (hhmm === '0930') {
+        signalMarker = null;
         signalCandleSeries.setMarkers([]);
       } else {
-        signalCandleSeries.setMarkers([{
-	          time: ts,
-	          position: isBuy ? "belowBar" : "aboveBar",
-	          shape: isBuy ? "arrowUp" : "arrowDown",
-	          color: isBuy ? "#21c58f" : "#ff8a5a",
-	          size: 2
-	        }]);
+        signalMarker = {
+          time: ts,
+          position: isBuy ? "belowBar" : "aboveBar",
+          shape: isBuy ? "arrowUp" : "arrowDown",
+          color: isBuy ? "#21c58f" : "#ff8a5a",
+          size: 2
+        };
+        signalCandleSeries.setMarkers([signalMarker]);
+      }
+      if (plottedCandles.length > 0) {
+        let initialCount = plottedCandles.filter(c => c.time <= ts).length;
+        if (initialCount < 1) initialCount = 1;
+        signalStepModeEnabled = true;
+        signalRevealCandles = plottedCandles;
+        signalRevealVolume = plottedVolume;
+        signalRevealVwap = plottedVwap;
+        signalRevealSma = plottedSma;
+        applySignalRevealData(initialCount);
       }
     } else {
       signalCandleSeries.setMarkers([]);
