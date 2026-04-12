@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>Chart - {{TICKER}} {{DATE}} {{TIME_DISPLAY}}</title>
   <!-- Bootstrap & Tabulator CSS -->
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
@@ -141,6 +142,30 @@
     }
     .btn-outline-light { color: var(--text); border-color: var(--border); }
     .btn-outline-light:hover { background: var(--surface-2); border-color: var(--accent); color: var(--text); }
+    .signal-step-controls {
+      display: none;
+      justify-content: flex-end;
+      margin: -1rem 0 1.25rem;
+    }
+    #signal-next-candle {
+      min-width: 132px;
+      min-height: 44px;
+    }
+    @media (max-width: 768px) {
+      .signal-step-controls {
+        position: fixed;
+        right: 1rem;
+        bottom: calc(0.75rem + env(safe-area-inset-bottom));
+        z-index: 1100;
+        margin: 0;
+        pointer-events: none;
+      }
+      .signal-step-controls.is-visible { display: flex; }
+      #signal-next-candle {
+        pointer-events: auto;
+        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+      }
+    }
     .market-radar {
       margin-top: 1rem;
       margin-bottom: 1rem;
@@ -258,6 +283,9 @@
         <div id="signal-radar-intraday"></div>
       </section>
       <div id="signal-chart" class="border rounded"></div>
+      <div id="signal-step-controls" class="signal-step-controls">
+        <button id="signal-next-candle" class="btn btn-primary" type="button" disabled>Next candle</button>
+      </div>
       <h4>Metrics (as of {{TIME_DISPLAY}})</h4>
       <div id="signal-metrics-sheet"></div>
       <div class="d-flex justify-content-between align-items-center mb-2">
@@ -452,6 +480,23 @@ function applySignalRevealData(visibleCount) {
   } else {
     signalCandleSeries.setMarkers([]);
   }
+  updateSignalStepControls();
+}
+
+function updateSignalStepControls() {
+  const controls = document.getElementById('signal-step-controls');
+  const button = document.getElementById('signal-next-candle');
+  if (!controls || !button) return;
+  const canShow = signalStepModeEnabled && signalRevealCandles.length > 0 && isSignalTabActive();
+  const canAdvance = canShow && signalVisibleCandles < signalRevealCandles.length;
+  controls.classList.toggle('is-visible', canShow);
+  button.disabled = !canAdvance;
+}
+
+function advanceSignalCandle() {
+  if (!signalStepModeEnabled || !isSignalTabActive()) return;
+  if (signalVisibleCandles >= signalRevealCandles.length) return;
+  applySignalRevealData(signalVisibleCandles + 1);
 }
 
 function setupSignalKeyNavigation() {
@@ -461,7 +506,7 @@ function setupSignalKeyNavigation() {
     if (!signalStepModeEnabled || !isSignalTabActive() || hasTypingFocus()) return;
     if (signalVisibleCandles >= signalRevealCandles.length) return;
     e.preventDefault();
-    applySignalRevealData(signalVisibleCandles + 1);
+    advanceSignalCandle();
   });
   signalKeyListenerAdded = true;
 }
@@ -752,6 +797,7 @@ async function loadSignalChart() {
     signalRevealSma = [];
     signalVisibleCandles = 0;
     signalMarker = null;
+    updateSignalStepControls();
     if (hasSignalTime) {
       const hhmm = String(timeStr).replace(':','').padStart(4,'0');
       const ts = combineDateAndTime(date, hhmm) / 1000;
@@ -882,6 +928,9 @@ async function loadSignalChart() {
       ],
     });
     if (!signalListenersAdded) {
+      document.getElementById('signal-next-candle').addEventListener('click', () => {
+        advanceSignalCandle();
+      });
       document.getElementById('signal-copy-news').addEventListener('click', () => {
         const jsonData = {
           ticker: ticker,
@@ -1916,6 +1965,7 @@ document.getElementById('signal-tab').addEventListener('shown.bs.tab', () => {
   if (signalChart) {
     signalChart.resize(document.getElementById('signal-chart').clientWidth, 600);
   }
+  updateSignalStepControls();
 });
 document.getElementById('base-tab').addEventListener('shown.bs.tab', () => {
   if (!baseChart) {
