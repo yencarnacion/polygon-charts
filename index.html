@@ -162,6 +162,261 @@
       margin-bottom: 1rem;
       border-radius: 4px;
     }
+    .market-profile-shell {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      margin: 1rem 0 1.5rem;
+      padding: 1rem;
+    }
+    .market-profile-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 1rem;
+      flex-wrap: wrap;
+      margin-bottom: 1rem;
+    }
+    .market-profile-head h4 { margin: 0; }
+    .market-profile-note {
+      color: var(--muted);
+      font-size: 0.88rem;
+      max-width: 720px;
+      margin: 0.2rem 0 0;
+    }
+    .market-profile-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+      gap: 1rem;
+    }
+    .mp-card {
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.85rem;
+      min-width: 0;
+    }
+    .mp-card-title {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 0.75rem;
+      margin-bottom: 0.7rem;
+    }
+    .mp-card-title h5 {
+      margin: 0;
+      font-size: 1rem;
+    }
+    .mp-status {
+      color: var(--muted);
+      font-size: 0.78rem;
+      text-align: right;
+      white-space: nowrap;
+    }
+    .mp-summary {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 0.5rem;
+      margin-bottom: 0.75rem;
+    }
+    .mp-stat {
+      background: rgba(7, 14, 24, 0.36);
+      border: 1px solid rgba(49, 70, 99, 0.72);
+      border-radius: 6px;
+      padding: 0.45rem 0.55rem;
+      min-height: 58px;
+    }
+    .mp-stat-label {
+      color: var(--muted);
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+    .mp-stat-value {
+      color: var(--text);
+      font-weight: 700;
+      margin-top: 0.16rem;
+      line-height: 1.15;
+      word-break: break-word;
+    }
+    .mp-stat-help {
+      color: var(--muted);
+      font-size: 0.68rem;
+      line-height: 1.2;
+      margin-top: 0.22rem;
+    }
+    .mp-profile {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      border-top: 1px solid rgba(49, 70, 99, 0.6);
+      border-bottom: 1px solid rgba(49, 70, 99, 0.6);
+      padding: 0.45rem 0;
+    }
+    .mp-row {
+      display: grid;
+      grid-template-columns: 68px minmax(0, 1fr) 44px;
+      gap: 0.45rem;
+      align-items: center;
+      min-height: 17px;
+      position: relative;
+      border-radius: 4px;
+    }
+    .mp-row.mp-value-area { background: rgba(79, 167, 255, 0.09); }
+    .mp-row.mp-poc { background: rgba(255, 209, 102, 0.14); }
+    .mp-price {
+      color: var(--muted);
+      font-size: 0.74rem;
+      font-variant-numeric: tabular-nums;
+      text-align: right;
+    }
+    .mp-grid-header {
+      display: grid;
+      grid-template-columns: 68px minmax(0, 1fr) 44px;
+      gap: 0.45rem;
+      align-items: center;
+      margin-bottom: 0.25rem;
+      color: var(--muted);
+      font-size: 0.62rem;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+    .mp-period-labels,
+    .mp-tpo-grid {
+      display: grid;
+      grid-template-columns: repeat(var(--periods), minmax(10px, 1fr));
+      gap: 2px;
+      min-width: 0;
+    }
+    .mp-period-label {
+      text-align: center;
+      color: var(--muted);
+      font-size: 0.58rem;
+      line-height: 1;
+    }
+    .mp-tpo-cell {
+      height: 14px;
+      border: 1px solid rgba(103, 129, 159, 0.34);
+      border-radius: 2px;
+      background: rgba(7, 14, 24, 0.32);
+      color: transparent;
+      font-size: 0.54rem;
+      line-height: 12px;
+      text-align: center;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+    }
+    .mp-tpo-cell.active {
+      background: #67819f;
+      border-color: rgba(142, 208, 255, 0.45);
+      color: #f2f7ff;
+    }
+    .mp-row.mp-value-area .mp-tpo-cell.active {
+      background: #4fa7ff;
+      color: #061322;
+    }
+    .mp-row.mp-poc .mp-tpo-cell.active {
+      background: var(--warning);
+      border-color: rgba(255, 232, 161, 0.85);
+      color: #081421;
+    }
+    .mp-count {
+      color: var(--muted);
+      font-size: 0.72rem;
+      font-variant-numeric: tabular-nums;
+    }
+    .mp-tag {
+      display: inline-block;
+      border-radius: 4px;
+      padding: 0.06rem 0.25rem;
+      margin-left: 0.25rem;
+      font-size: 0.66rem;
+      font-weight: 700;
+      color: #081421;
+      vertical-align: middle;
+    }
+    .mp-tag-poc { background: var(--warning); }
+    .mp-tag-va { background: #8ed0ff; }
+    .mp-empty {
+      color: var(--muted);
+      border: 1px dashed var(--border);
+      border-radius: 8px;
+      padding: 1rem;
+      margin: 0;
+    }
+    .mp-evolution {
+      margin-top: 0.8rem;
+      padding-top: 0.65rem;
+      border-top: 1px solid rgba(49, 70, 99, 0.6);
+    }
+    .mp-evo-title {
+      color: var(--muted);
+      font-size: 0.78rem;
+      margin-bottom: 0.45rem;
+    }
+    .mp-evo-chart {
+      display: flex;
+      align-items: stretch;
+      height: 78px;
+      gap: 3px;
+      padding: 0 0.15rem;
+      background: linear-gradient(to bottom, transparent 49%, rgba(168, 185, 206, 0.35) 49%, rgba(168, 185, 206, 0.35) 51%, transparent 51%);
+    }
+    .mp-evo-slot {
+      flex: 1 1 0;
+      min-width: 10px;
+      position: relative;
+    }
+    .mp-evo-bar {
+      position: absolute;
+      left: 18%;
+      width: 64%;
+      min-height: 2px;
+      border-radius: 3px 3px 0 0;
+    }
+    .mp-evo-bar.pos {
+      bottom: 39px;
+      background: var(--positive);
+    }
+    .mp-evo-bar.neg {
+      top: 39px;
+      background: var(--negative);
+      border-radius: 0 0 3px 3px;
+    }
+    .mp-evo-label {
+      position: absolute;
+      left: 50%;
+      bottom: 0;
+      transform: translateX(-50%);
+      color: var(--muted);
+      font-size: 0.62rem;
+      white-space: nowrap;
+    }
+    .mp-legend {
+      display: flex;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+      color: var(--muted);
+      font-size: 0.75rem;
+      margin-top: 0.45rem;
+    }
+    .mp-dot {
+      display: inline-block;
+      width: 9px;
+      height: 9px;
+      border-radius: 999px;
+      margin-right: 0.25rem;
+    }
+    .mp-dot.pos { background: var(--positive); }
+    .mp-dot.neg { background: var(--negative); }
+    .mp-dot.va { background: #4fa7ff; }
+    .mp-dot.poc { background: var(--warning); }
+    @media (max-width: 520px) {
+      .market-profile-grid { grid-template-columns: 1fr; }
+      .mp-summary { grid-template-columns: 1fr; }
+      .mp-row { grid-template-columns: 58px minmax(0, 1fr) 36px; }
+      .mp-status { text-align: left; }
+    }
     .tabulator-row:hover .tabulator-cell {
       background-color: #253955 !important;
       color: #f5f9ff !important;
@@ -284,6 +539,7 @@
       </div>
       <div id="row-indicator"></div>
       <div id="chart" class="border mt-4 rounded"></div>
+      <div id="market-profile-container" class="market-profile-shell"></div>
       <section class="market-radar" data-marketaux-section>
         <div class="d-flex justify-content-between align-items-center gap-2 flex-wrap">
           <h4 class="mb-0">Catalyst Radar (Marketaux)</h4>
@@ -506,6 +762,433 @@ function nyHourMinute(epochMillis) {
     else if (p.type === 'minute') mm = Number(p.value);
   }
   return [hh, mm];
+}
+
+const MP_RTH_START = 9 * 60 + 30;
+const MP_RTH_END = 16 * 60;
+const MP_PERIOD_MINUTES = 30;
+const MP_PERIOD_LABELS = "ABCDEFGHIJKLM".split("");
+const marketProfilePriorDateCache = {};
+const marketProfileMinuteCache = {};
+
+function mpEscape(value) {
+  return String(value ?? "").replace(/[&<>"']/g, ch => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;"
+  }[ch]));
+}
+
+function mpFormatPrice(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "-";
+  if (Math.abs(n) < 1) return n.toFixed(4);
+  return n.toFixed(2);
+}
+
+function mpMinuteLabel(minuteOfDay) {
+  const h = Math.floor(minuteOfDay / 60);
+  const m = minuteOfDay % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+function mpEtMinute(epochSec) {
+  const [h, m] = nyHourMinute(epochSec * 1000);
+  return h * 60 + m;
+}
+
+function mpPeriodIndex(epochSec) {
+  const minute = mpEtMinute(epochSec);
+  if (minute < MP_RTH_START || minute >= MP_RTH_END) return -1;
+  return Math.floor((minute - MP_RTH_START) / MP_PERIOD_MINUTES);
+}
+
+function mpRthCandles(candles) {
+  return (Array.isArray(candles) ? candles : [])
+    .filter(c => c && Number.isFinite(Number(c.time)) &&
+      Number.isFinite(Number(c.high)) && Number.isFinite(Number(c.low)) &&
+      Number.isFinite(Number(c.close)))
+    .filter(c => {
+      const minute = mpEtMinute(Number(c.time));
+      return minute >= MP_RTH_START && minute < MP_RTH_END;
+    })
+    .map(c => ({
+      time: Number(c.time),
+      high: Number(c.high),
+      low: Number(c.low),
+      close: Number(c.close)
+    }))
+    .sort((a, b) => a.time - b.time);
+}
+
+function mpNiceTickSize(range) {
+  if (!Number.isFinite(range) || range <= 0) return 0.01;
+  const raw = range / 38;
+  const magnitude = Math.pow(10, Math.floor(Math.log10(raw)));
+  for (const step of [1, 2, 5, 10]) {
+    const candidate = step * magnitude;
+    if (candidate >= raw) return Math.max(0.01, candidate);
+  }
+  return Math.max(0.01, 10 * magnitude);
+}
+
+function mpComputeFromRth(rthCandles, forcedTick = null) {
+  if (!rthCandles.length) return null;
+  let low = rthCandles[0].low;
+  let high = rthCandles[0].high;
+  for (const c of rthCandles) {
+    if (c.low < low) low = c.low;
+    if (c.high > high) high = c.high;
+  }
+  const tick = Number.isFinite(Number(forcedTick)) && Number(forcedTick) > 0 ? Number(forcedTick) : mpNiceTickSize(high - low);
+  const rowPeriods = new Map();
+  for (const c of rthCandles) {
+    const period = mpPeriodIndex(c.time);
+    if (period < 0) continue;
+    let lo = Math.floor(c.low / tick);
+    let hi = Math.floor(c.high / tick);
+    if (hi < lo) [lo, hi] = [hi, lo];
+    for (let idx = lo; idx <= hi; idx++) {
+      let periods = rowPeriods.get(idx);
+      if (!periods) {
+        periods = new Set();
+        rowPeriods.set(idx, periods);
+      }
+      periods.add(period);
+    }
+  }
+  const rows = Array.from(rowPeriods.entries())
+    .map(([idx, periods]) => {
+      const sortedPeriods = Array.from(periods.values()).sort((a, b) => a - b);
+      return { idx, price: idx * tick, count: sortedPeriods.length, periods: sortedPeriods };
+    })
+    .sort((a, b) => a.idx - b.idx);
+  if (!rows.length) return null;
+
+  const totalTpos = rows.reduce((sum, row) => sum + row.count, 0);
+  const maxCount = Math.max(...rows.map(row => row.count));
+  const centerIdx = (rows[0].idx + rows[rows.length - 1].idx) / 2;
+  let pocPos = 0;
+  for (let i = 0; i < rows.length; i++) {
+    if (rows[i].count !== maxCount) continue;
+    const best = rows[pocPos];
+    if (best.count !== maxCount || Math.abs(rows[i].idx - centerIdx) < Math.abs(best.idx - centerIdx)) {
+      pocPos = i;
+    }
+  }
+
+  const target = Math.ceil(totalTpos * 0.70);
+  const included = new Set([pocPos]);
+  let valueTpos = rows[pocPos].count;
+  let below = pocPos - 1;
+  let above = pocPos + 1;
+  while (valueTpos < target && (below >= 0 || above < rows.length)) {
+    const belowCount = below >= 0 ? rows[below].count : -1;
+    const aboveCount = above < rows.length ? rows[above].count : -1;
+    if (aboveCount > belowCount) {
+      included.add(above);
+      valueTpos += aboveCount;
+      above++;
+    } else if (belowCount > aboveCount) {
+      included.add(below);
+      valueTpos += belowCount;
+      below--;
+    } else if (aboveCount >= 0) {
+      included.add(above);
+      valueTpos += aboveCount;
+      above++;
+      if (valueTpos < target && below >= 0) {
+        included.add(below);
+        valueTpos += belowCount;
+        below--;
+      }
+    } else {
+      break;
+    }
+  }
+  const includedPositions = Array.from(included.values());
+  const valueLowPos = Math.min(...includedPositions);
+  const valueHighPos = Math.max(...includedPositions);
+
+  const excludedTailPositions = new Set();
+  for (let i = 0; i < rows.length && rows[i].count <= 1; i++) excludedTailPositions.add(i);
+  for (let i = rows.length - 1; i >= 0 && rows[i].count <= 1; i--) excludedTailPositions.add(i);
+
+  let abovePoc = 0;
+  let belowPoc = 0;
+  for (let i = 0; i < rows.length; i++) {
+    if (i === pocPos || excludedTailPositions.has(i)) continue;
+    if (i > pocPos) abovePoc += rows[i].count;
+    if (i < pocPos) belowPoc += rows[i].count;
+  }
+
+  const lastMinute = Math.max(...rthCandles.map(c => mpEtMinute(c.time)));
+  return {
+    rows,
+    totalTpos,
+    maxCount,
+    tick,
+    pocPos,
+    pocIdx: rows[pocPos].idx,
+    pocPrice: rows[pocPos].price,
+    valueLowPos,
+    valueHighPos,
+    valueLowIdx: rows[valueLowPos].idx,
+    valueHighIdx: rows[valueHighPos].idx,
+    valueLow: rows[valueLowPos].price,
+    valueHigh: rows[valueHighPos].price,
+    valueTpos,
+    abovePoc,
+    belowPoc,
+    lastMinute,
+    isComplete: lastMinute >= MP_RTH_END - 1
+  };
+}
+
+function mpBuildEvolution(rthCandles, tick = null) {
+  const out = [];
+  for (let end = MP_RTH_START + 30; end <= MP_RTH_END; end += 30) {
+    const subset = rthCandles.filter(c => mpEtMinute(c.time) < end);
+    if (!subset.length) continue;
+    const profile = mpComputeFromRth(subset, tick);
+    if (!profile) continue;
+    const denom = profile.abovePoc + profile.belowPoc;
+    const imbalance = denom > 0 ? (profile.abovePoc - profile.belowPoc) / denom : 0;
+    out.push({
+      label: mpMinuteLabel(end),
+      above: profile.abovePoc,
+      below: profile.belowPoc,
+      imbalance
+    });
+  }
+  return out;
+}
+
+function mpBuildProfile(candles, tick = null) {
+  const rth = mpRthCandles(candles);
+  const profile = mpComputeFromRth(rth, tick);
+  if (!profile) return { rth, profile: null, evolution: [] };
+  return { rth, profile, evolution: mpBuildEvolution(rth, profile.tick) };
+}
+
+function mpSharedTick(...rthSets) {
+  const all = rthSets.flat().filter(Boolean);
+  if (!all.length) return null;
+  let low = all[0].low;
+  let high = all[0].high;
+  for (const c of all) {
+    if (c.low < low) low = c.low;
+    if (c.high > high) high = c.high;
+  }
+  return mpNiceTickSize(high - low);
+}
+
+function mpBuildAxisRows(...profiles) {
+  const active = profiles.filter(p => p && p.rows && p.rows.length);
+  if (!active.length) return [];
+  const tick = active[0].tick;
+  let minIdx = active[0].rows[0].idx;
+  let maxIdx = active[0].rows[active[0].rows.length - 1].idx;
+  for (const profile of active) {
+    minIdx = Math.min(minIdx, profile.rows[0].idx);
+    maxIdx = Math.max(maxIdx, profile.rows[profile.rows.length - 1].idx);
+  }
+  const rows = [];
+  for (let idx = minIdx; idx <= maxIdx; idx++) {
+    rows.push({ idx, price: idx * tick });
+  }
+  return rows;
+}
+
+async function mpFetchPriorTradingDate(ticker, dateStr) {
+  const key = `${ticker.toUpperCase()}:${dateStr}`;
+  if (marketProfilePriorDateCache[key]) return marketProfilePriorDateCache[key];
+  const to = shiftDate(dateStr, -1);
+  const from = shiftDate(dateStr, -30);
+  const { data } = await axios.get("/api/candles", {
+    params: { ticker: ticker.toUpperCase(), timeframe: "1d", from, to }
+  });
+  const candles = Array.isArray(data.candles) ? data.candles : [];
+  if (!candles.length) return "";
+  const priorDate = formatIsoDate(new Date(candles[candles.length - 1].time * 1000));
+  marketProfilePriorDateCache[key] = priorDate;
+  return priorDate;
+}
+
+async function mpFetchMinuteCandles(ticker, dateStr) {
+  const key = `${ticker.toUpperCase()}:${dateStr}`;
+  if (marketProfileMinuteCache[key]) return marketProfileMinuteCache[key].map(c => ({ ...c }));
+  const { data } = await axios.get("/api/candles", {
+    params: { ticker: ticker.toUpperCase(), timeframe: "1m", date: dateStr }
+  });
+  const candles = Array.isArray(data.minCandles) && data.minCandles.length ? data.minCandles : (data.candles || []);
+  marketProfileMinuteCache[key] = candles.map(c => ({ ...c }));
+  return marketProfileMinuteCache[key].map(c => ({ ...c }));
+}
+
+function mpRenderEvolution(evolution) {
+  if (!evolution.length) return "";
+  const last = evolution.length - 1;
+  const mid = Math.floor(last / 2);
+  const slots = evolution.map((point, i) => {
+    const abs = Math.abs(point.imbalance);
+    const height = Math.max(2, Math.round(abs * 34));
+    const cls = point.imbalance >= 0 ? "pos" : "neg";
+    const label = i === 0 || i === mid || i === last ? `<span class="mp-evo-label">${mpEscape(point.label)}</span>` : "";
+    const title = `${point.label} ET: ${point.above}:${point.below} TPOs`;
+    return `<div class="mp-evo-slot" title="${mpEscape(title)}"><span class="mp-evo-bar ${cls}" style="height:${height}px"></span>${label}</div>`;
+  }).join("");
+  return `
+    <div class="mp-evolution">
+      <div class="mp-evo-title">TPO imbalance through the session</div>
+      <div class="mp-evo-chart">${slots}</div>
+      <div class="mp-legend">
+        <span><span class="mp-dot pos"></span>Above POC heavier</span>
+        <span><span class="mp-dot neg"></span>Below POC heavier</span>
+      </div>
+    </div>
+  `;
+}
+
+function mpRenderCard(title, dateStr, built, axisRows = []) {
+  if (!built || !built.profile) {
+    return `
+      <article class="mp-card">
+        <div class="mp-card-title">
+          <h5>${mpEscape(title)}</h5>
+          <div class="mp-status">${mpEscape(dateStr || "")}</div>
+        </div>
+        <p class="mp-empty">No RTH bars are available for this profile yet.</p>
+      </article>
+    `;
+  }
+  const p = built.profile;
+  const renderRows = axisRows.length ? axisRows : p.rows;
+  const rowsByIdx = new Map(p.rows.map(row => [row.idx, row]));
+  const status = p.isComplete ? "Complete RTH" : `RTH through ${mpMinuteLabel(p.lastMinute)} ET`;
+  const periodLabels = MP_PERIOD_LABELS.map(label => `<span class="mp-period-label">${label}</span>`).join("");
+  const headerHtml = `
+    <div class="mp-grid-header">
+      <span>Price</span>
+      <div class="mp-period-labels" style="--periods:${MP_PERIOD_LABELS.length}">${periodLabels}</div>
+      <span>TPOs</span>
+    </div>
+  `;
+  const rowsHtml = renderRows.slice().reverse().map(axisRow => {
+    const row = rowsByIdx.get(axisRow.idx) || { idx: axisRow.idx, price: axisRow.price, count: 0, periods: [] };
+    const isPoc = row.idx === p.pocIdx;
+    const isVA = row.idx >= p.valueLowIdx && row.idx <= p.valueHighIdx;
+    const activePeriods = new Set(row.periods || []);
+    const tags = [
+      isPoc ? '<span class="mp-tag mp-tag-poc">POC</span>' : "",
+      row.idx === p.valueHighIdx ? '<span class="mp-tag mp-tag-va">VAH</span>' : "",
+      row.idx === p.valueLowIdx ? '<span class="mp-tag mp-tag-va">VAL</span>' : ""
+    ].join("");
+    const cells = MP_PERIOD_LABELS.map((label, i) => {
+      const active = activePeriods.has(i);
+      const start = MP_RTH_START + i * MP_PERIOD_MINUTES;
+      const end = start + MP_PERIOD_MINUTES;
+      const title = `${label}: ${mpMinuteLabel(start)}-${mpMinuteLabel(end)} ET`;
+      return `<span class="mp-tpo-cell ${active ? "active" : ""}" title="${mpEscape(title)}">${active ? label : ""}</span>`;
+    }).join("");
+    return `
+      <div class="mp-row ${isVA ? "mp-value-area" : ""} ${isPoc ? "mp-poc" : ""}">
+        <div class="mp-price">${mpFormatPrice(row.price)}${tags}</div>
+        <div class="mp-tpo-grid" style="--periods:${MP_PERIOD_LABELS.length}" aria-label="TPO prints by 30-minute period">${cells}</div>
+        <div class="mp-count">${row.count}</div>
+      </div>
+    `;
+  }).join("");
+  return `
+    <article class="mp-card">
+      <div class="mp-card-title">
+        <h5>${mpEscape(title)}</h5>
+        <div class="mp-status">${mpEscape(dateStr)}<br>${mpEscape(status)}</div>
+      </div>
+      <div class="mp-summary">
+        <div class="mp-stat">
+          <div class="mp-stat-label">POC</div>
+          <div class="mp-stat-value">${mpFormatPrice(p.pocPrice)}</div>
+        </div>
+        <div class="mp-stat">
+          <div class="mp-stat-label">Value Area</div>
+          <div class="mp-stat-value">${mpFormatPrice(p.valueLow)}-${mpFormatPrice(p.valueHigh)}</div>
+        </div>
+        <div class="mp-stat">
+          <div class="mp-stat-label">Above : Below POC</div>
+          <div class="mp-stat-value">${p.abovePoc}:${p.belowPoc}</div>
+          <div class="mp-stat-help">Time accepted above vs. below fair price. More above suggests buyers accepted higher prices; more below suggests sellers kept trade lower.</div>
+        </div>
+      </div>
+      <div class="mp-profile">${headerHtml}${rowsHtml}</div>
+      ${mpRenderEvolution(built.evolution)}
+    </article>
+  `;
+}
+
+async function renderMarketProfiles(containerId, ticker, dateStr, currentCandles = null) {
+  const el = document.getElementById(containerId);
+  if (!el || !ticker || !dateStr) return;
+  el.innerHTML = `
+    <div class="market-profile-head">
+      <div>
+        <h4>Market Profile (RTH Only)</h4>
+        <p class="market-profile-note">09:30-16:00 ET only. The candlestick chart above still uses the existing full available session data.</p>
+      </div>
+    </div>
+    <p class="mp-empty">Loading Market Profile...</p>
+  `;
+  try {
+    const current = currentCandles ? currentCandles.map(c => ({ ...c })) : await mpFetchMinuteCandles(ticker, dateStr);
+    const currentRth = mpRthCandles(current);
+    let priorDate = "";
+    let prior = [];
+    let priorRth = [];
+    let priorBuilt = null;
+    try {
+      priorDate = await mpFetchPriorTradingDate(ticker, dateStr);
+      if (priorDate) {
+        prior = await mpFetchMinuteCandles(ticker, priorDate);
+        priorRth = mpRthCandles(prior);
+      }
+    } catch (err) {
+      console.warn("[marketProfile] prior profile unavailable", err);
+    }
+    const sharedTick = mpSharedTick(priorRth, currentRth);
+    const priorCandidate = priorDate ? mpBuildProfile(prior, sharedTick) : null;
+    priorBuilt = priorCandidate && priorCandidate.profile ? priorCandidate : null;
+    const currentBuilt = mpBuildProfile(current, sharedTick);
+    const axisRows = mpBuildAxisRows(priorBuilt?.profile, currentBuilt?.profile);
+    el.innerHTML = `
+      <div class="market-profile-head">
+        <div>
+          <h4>Market Profile (RTH Only)</h4>
+          <p class="market-profile-note">Previous day is on the left. Both profiles share the same price ladder, so today can be read directly against prior value. Each cell is one 30-minute TPO period, A-M from 09:30 to 16:00 ET.</p>
+        </div>
+        <div class="mp-legend">
+          <span><span class="mp-dot poc"></span>POC</span>
+          <span><span class="mp-dot va"></span>Value Area</span>
+        </div>
+      </div>
+      <div class="market-profile-grid">
+        ${mpRenderCard("Previous Day", priorDate || "Unavailable", priorBuilt, axisRows)}
+        ${mpRenderCard("Current Day", dateStr, currentBuilt, axisRows)}
+      </div>
+    `;
+  } catch (err) {
+    console.error("[marketProfile] error", err);
+    el.innerHTML = `
+      <div class="market-profile-head">
+        <div>
+          <h4>Market Profile (RTH Only)</h4>
+          <p class="market-profile-note">09:30-16:00 ET only. The candlestick chart above is unchanged.</p>
+        </div>
+      </div>
+      <p class="mp-empty">Market Profile is unavailable for this symbol/date.</p>
+    `;
+  }
 }
 
 // Place a vertical dashed line + label at 09:30 NY on a lightweight-charts chart
@@ -1098,6 +1781,7 @@ async function load(e, skipDefaultRow = false){
     if (!watchlistMode) {
       await fetchPriorDayClose(ticker,date);
     }
+    const marketProfileCandles = Array.isArray(data.minCandles) ? data.minCandles.map(c => ({ ...c })) : [];
     // Determine multMin for aggregation
     let multMin;
     switch(timeframe) {
@@ -1188,6 +1872,7 @@ async function load(e, skipDefaultRow = false){
     candleSeries.setMarkers([]);
     setSessionVisibleRange(chart, date);
     drawRthOpenLine(chart, document.getElementById('chart'), date);
+    renderMarketProfiles('market-profile-container', ticker, date, marketProfileCandles);
     if (watchlistMode) {
       currentNews = [];
       currentFilings = [];
