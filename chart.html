@@ -680,6 +680,8 @@ const marketauxEnabled = {{MARKETAUX_ENABLED}};
 // Signal Chart Logic
 let signalListenersAdded = false;
 let signalChart, signalCandleSeries, signalVolumeSeries, signalVwapSeries, signalSmaSeries;
+let signalMetricsTable, signalNewsTable, signalFilingsTable;
+let signalCurrentNews = [], signalCurrentFilings = [];
 let signalKeyListenerAdded = false;
 let signalStepModeEnabled = false;
 let signalRevealCandles = [];
@@ -1051,248 +1053,346 @@ async function fetchFloat(ticker) {
     return '';
   }
 }
-async function loadSignalChart() {
-  try {
-    initSignalChart();
-    setupSignalKeyNavigation();
-    const requestParams = { ticker, resolution: timeframe, date };
-    if (hasSignalTime) {
-      requestParams.time = timeStr;
-    }
-    const { data } = await axios.get('/api/chart-data', { params: requestParams });
-    let plottedCandles = data.candles || [];
-    let plottedVolume = data.volume || [];
-    let plottedVwap = data.vwap || [];
-    let plottedSma = data.sma || [];
-    let profileMinCandles = Array.isArray(data.minCandles) ? data.minCandles.map(c => ({ ...c })) : [];
-    if (hasSignalTime) {
-      try {
-        const { data: fullSessionData } = await axios.get('/api/candles', { params: { ticker, timeframe, date } });
-        if (Array.isArray(fullSessionData.candles) && fullSessionData.candles.length > 0) {
-          plottedCandles = fullSessionData.candles;
-          plottedVolume = fullSessionData.volume || [];
-          plottedVwap = fullSessionData.vwap || [];
-          plottedSma = fullSessionData.sma || [];
-          profileMinCandles = Array.isArray(fullSessionData.minCandles) ? fullSessionData.minCandles.map(c => ({ ...c })) : profileMinCandles;
-        }
-      } catch (fullErr) {
-        console.warn('[loadSignalChart] full-session fetch failed, falling back to chart-data payload', fullErr);
+
+function formatTableVolume(value) {
+  if (value === undefined || value === null || value === '') return '-';
+  const n = parseFloat(value);
+  return Number.isFinite(n) ? n.toLocaleString() : '-';
+}
+
+function signalMetricColumns() {
+  return [
+    { title: "TICKER", field: "ticker", minWidth: 80, headerSort: false, headerTooltip: true },
+    { title: "TIME", field: "time", minWidth: 80, headerSort: false, headerTooltip: true },
+    {
+      title: "SIGNAL", field: "signal", minWidth: 80, headerSort: false, headerTooltip: true,
+      formatter: function(cell) {
+        const val = cell.getValue().toLowerCase();
+        return `<span class="signal-${val}">${val.toUpperCase()}</span>`;
       }
-    }
-    const profile = data.profile || {};
-    const companyNameEl = document.getElementById('signal-company-name');
-    if (companyNameEl) {
-      companyNameEl.textContent = profile.companyName || profile.name || 'N/A';
-    }
-    signalCandleSeries.setData(plottedCandles);
-    signalVolumeSeries.setData(plottedVolume);
-    signalVwapSeries.setData(plottedVwap);
-    signalSmaSeries.setData(plottedSma);
-    signalStepModeEnabled = false;
-    signalRevealCandles = [];
-    signalRevealVolume = [];
-    signalRevealVwap = [];
-    signalRevealSma = [];
-    signalProfileMinuteCandles = profileMinCandles.map(c => ({ ...c }));
-    signalVisibleCandles = 0;
-    signalMarker = null;
-    updateSignalStepControls();
-    if (hasSignalTime) {
-      const hhmm = String(timeStr).replace(':','').padStart(4,'0');
-      const ts = combineDateAndTime(date, hhmm) / 1000;
-      const isBuy = signal === "buy";
-      if (hhmm === '0930') {
-        signalMarker = null;
-        signalCandleSeries.setMarkers([]);
-      } else {
-        signalMarker = {
-          time: ts,
-          position: isBuy ? "belowBar" : "aboveBar",
-          shape: isBuy ? "arrowUp" : "arrowDown",
-          color: isBuy ? "#21c58f" : "#ff8a5a",
-          size: 2
-        };
-        signalCandleSeries.setMarkers([signalMarker]);
-      }
-      if (plottedCandles.length > 0) {
-        let initialCount = plottedCandles.filter(c => c.time <= ts).length;
-        if (initialCount < 1) initialCount = 1;
-        signalStepModeEnabled = true;
-        signalRevealCandles = plottedCandles;
-        signalRevealVolume = plottedVolume;
-        signalRevealVwap = plottedVwap;
-        signalRevealSma = plottedSma;
-        applySignalRevealData(initialCount);
-      }
-    } else {
-      signalCandleSeries.setMarkers([]);
-    }
-    setSessionVisibleRange(signalChart, date);
-    drawRthOpenLine(signalChart, document.getElementById('signal-chart'), date);
-    if (!hasSignalTime || !signalStepModeEnabled) {
-      const profileCutoff = hasSignalTime ? combineDateAndTime(date, String(timeStr).replace(':','').padStart(4,'0')) / 1000 : null;
-      updateSignalMarketProfile(profileCutoff);
-    }
-    if (marketauxEnabled) {
-      await displayMarketRadar('signal', ticker, date);
-    }
-    const metrics = data.metrics;
-    let d = new Date(date);
-    d.setDate(d.getDate() - 1);
-    while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() - 1);
-    const priorDate = d.toISOString().split('T')[0];
-    const preVol = await calculatePreMarketVolume(ticker, date, priorDate);
-    const row = {
-      ticker,
-      time: hasSignalTime ? timeStr : "N/A",
-      signal: signal.toUpperCase(),
-      market_cap: await fetchMarketCap(ticker),
-      'float': await fetchFloat(ticker),
-      open_price: metrics.open_price || '-',
-      close_price: metrics.close_price || '-',
-      high_of_day: metrics.high_of_day || '-',
-      low_of_day: metrics.low_of_day || '-',
-      percent_gain_eod: metrics.percent_gain_eod || '-',
-      max_spiking_up_percent: metrics.max_spiking_up_percent || '-',
-      max_spiking_down_percent: metrics.max_spiking_down_percent || '-',
-      volume: parseFloat(metrics.volume || '0').toLocaleString(),
-      percent_gap_from_prior: metrics.percent_gap_from_prior || '-',
-      prior_day_volume: parseFloat(metrics.prior_day_volume || '0').toLocaleString(),
-      pre_market_volume: Math.round(preVol).toLocaleString(),
-    };
-    new Tabulator("#signal-metrics-sheet", {
+    },
+    { title: "MARKET CAP", field: "market_cap", minWidth: 80, headerSort: false, headerTooltip: true },
+    { title: "FLOAT", field: "float", minWidth: 80, headerSort: false, headerTooltip: true },
+    { title: "OPEN PRICE", field: "open_price", minWidth: 80, headerSort: false, headerTooltip: true },
+    { title: "CLOSE PRICE", field: "close_price", minWidth: 80, headerSort: false, headerTooltip: true },
+    { title: "HIGH OF DAY", field: "high_of_day", minWidth: 80, headerSort: false, headerTooltip: true },
+    { title: "LOW OF DAY", field: "low_of_day", minWidth: 80, headerSort: false, headerTooltip: true },
+    { title: "PERCENT GAIN EOD", field: "percent_gain_eod", minWidth: 80, headerSort: false, headerTooltip: true },
+    { title: "MAX SPIKING UP PERCENT", field: "max_spiking_up_percent", minWidth: 80, headerSort: false, headerTooltip: true },
+    { title: "MAX SPIKING DOWN PERCENT", field: "max_spiking_down_percent", minWidth: 80, headerSort: false, headerTooltip: true },
+    { title: "VOLUME", field: "volume", minWidth: 80, headerSort: false, headerTooltip: true },
+    { title: "PERCENT GAP FROM PRIOR", field: "percent_gap_from_prior", minWidth: 80, headerSort: false, headerTooltip: true },
+    { title: "PRIOR DAY VOLUME", field: "prior_day_volume", minWidth: 80, headerSort: false, headerTooltip: true },
+    { title: "PRE MARKET VOLUME", field: "pre_market_volume", minWidth: 80, headerSort: false, headerTooltip: true },
+  ];
+}
+
+function buildSignalMetricsRow(metrics = {}, overrides = {}) {
+  return {
+    ticker,
+    time: hasSignalTime ? timeStr : "N/A",
+    signal: signal.toUpperCase(),
+    market_cap: overrides.market_cap || '',
+    'float': overrides.float || '',
+    open_price: metrics.open_price || '-',
+    close_price: metrics.close_price || '-',
+    high_of_day: metrics.high_of_day || '-',
+    low_of_day: metrics.low_of_day || '-',
+    percent_gain_eod: metrics.percent_gain_eod || '-',
+    max_spiking_up_percent: metrics.max_spiking_up_percent || '-',
+    max_spiking_down_percent: metrics.max_spiking_down_percent || '-',
+    volume: formatTableVolume(metrics.volume),
+    percent_gap_from_prior: metrics.percent_gap_from_prior || '-',
+    prior_day_volume: formatTableVolume(metrics.prior_day_volume),
+    pre_market_volume: overrides.pre_market_volume || '',
+  };
+}
+
+function renderSignalMetricsRow(row) {
+  if (!signalMetricsTable) {
+    signalMetricsTable = new Tabulator("#signal-metrics-sheet", {
       data: [row],
       layout: "fitColumns",
       headerWordWrap: true,
       tooltipsHeader: true,
       tooltips: truncatedTooltip,
-      columns: [
-        { title: "TICKER", field: "ticker", minWidth: 80, headerSort: false, headerTooltip: true },
-        { title: "TIME", field: "time", minWidth: 80, headerSort: false, headerTooltip: true },
-        {
-          title: "SIGNAL", field: "signal", minWidth: 80, headerSort: false, headerTooltip: true,
-          formatter: function(cell) {
-            const val = cell.getValue().toLowerCase();
-            return `<span class="signal-${val}">${val.toUpperCase()}</span>`;
-          }
-        },
-        { title: "MARKET CAP", field: "market_cap", minWidth: 80, headerSort: false, headerTooltip: true },
-        { title: "FLOAT", field: "float", minWidth: 80, headerSort: false, headerTooltip: true },
-        { title: "OPEN PRICE", field: "open_price", minWidth: 80, headerSort: false, headerTooltip: true },
-        { title: "CLOSE PRICE", field: "close_price", minWidth: 80, headerSort: false, headerTooltip: true },
-        { title: "HIGH OF DAY", field: "high_of_day", minWidth: 80, headerSort: false, headerTooltip: true },
-        { title: "LOW OF DAY", field: "low_of_day", minWidth: 80, headerSort: false, headerTooltip: true },
-        { title: "PERCENT GAIN EOD", field: "percent_gain_eod", minWidth: 80, headerSort: false, headerTooltip: true },
-        { title: "MAX SPIKING UP PERCENT", field: "max_spiking_up_percent", minWidth: 80, headerSort: false, headerTooltip: true },
-        { title: "MAX SPIKING DOWN PERCENT", field: "max_spiking_down_percent", minWidth: 80, headerSort: false, headerTooltip: true },
-        { title: "VOLUME", field: "volume", minWidth: 80, headerSort: false, headerTooltip: true },
-        { title: "PERCENT GAP FROM PRIOR", field: "percent_gap_from_prior", minWidth: 80, headerSort: false, headerTooltip: true },
-        { title: "PRIOR DAY VOLUME", field: "prior_day_volume", minWidth: 80, headerSort: false, headerTooltip: true },
-        { title: "PRE MARKET VOLUME", field: "pre_market_volume", minWidth: 80, headerSort: false, headerTooltip: true },
-      ],
+      columns: signalMetricColumns(),
     });
-    const newsItems = data.news || [];
-    new Tabulator("#signal-news-sheet", {
-      data: newsItems,
+  } else {
+    signalMetricsTable.setData([row]);
+  }
+}
+
+function renderSignalProfile(profile) {
+  const prof = Array.isArray(profile) ? profile[0] : profile;
+  const companyNameEl = document.getElementById('signal-company-name');
+  if (companyNameEl) {
+    companyNameEl.textContent = prof?.companyName || prof?.name || 'N/A';
+  }
+  const profileDiv = document.getElementById('signal-profile-container');
+  if (!profileDiv) return;
+  profileDiv.innerHTML = '';
+  if (prof && Object.keys(prof).length > 0) {
+    profileDiv.innerHTML = `
+      <h4>Company Profile (Easy Digest for Day Traders)</h4>
+      <img src="${prof.image || ''}" alt="${prof.companyName || 'Company Logo'}">
+      <h5>${prof.companyName || 'N/A'}</h5>
+      <p><strong>Exchange:</strong> ${prof.exchange || 'N/A'}</p>
+      <p><strong>Industry:</strong> ${prof.industry || 'N/A'}</p>
+      <p><strong>Sector:</strong> ${prof.sector || 'N/A'}</p>
+      <p><strong>Country/State:</strong> ${prof.country || 'N/A'} / ${prof.state || 'N/A'}</p>
+      <p><strong>Full-time Employees:</strong> ${prof.fullTimeEmployees ? Number(prof.fullTimeEmployees).toLocaleString() : 'N/A'}</p>
+      <p><strong>Beta:</strong> ${prof.beta ? Number(prof.beta).toFixed(2) : 'N/A'}</p>
+      <p><strong>Last Dividend:</strong> ${prof.lastDividend ? Number(prof.lastDividend).toFixed(2) : 'N/A'}</p>
+      <p><strong>52W Range:</strong> ${prof.range || 'N/A'}</p>
+      <p><strong>Website:</strong> <a href="${prof.website || '#'}" target="_blank" rel="noopener noreferrer">${prof.website || 'N/A'}</a></p>
+      <p><strong>Description:</strong> ${prof.description || 'N/A'}</p>
+      <p><strong>IPO Date:</strong> ${prof.ipoDate || 'N/A'}</p>
+      <p><strong>Is ETF:</strong> ${prof.isEtf ? 'Yes' : 'No'}</p>
+    `;
+  }
+}
+
+function renderSignalNewsAndFilings(newsItems, filingsItems) {
+  signalCurrentNews = Array.isArray(newsItems) ? newsItems : [];
+  signalCurrentFilings = Array.isArray(filingsItems) ? filingsItems : [];
+  const newsColumns = [
+    {
+      title: "PUBLISHED", field: "published", minWidth: 150, headerSort: false, headerTooltip: true, vertAlign: "top",
+      formatter: function(cell) { return new Date(cell.getValue()).toLocaleString(); }
+    },
+    {
+      title: "TITLE", field: "title", minWidth: 400, headerSort: false, headerTooltip: true, vertAlign: "top",
+      formatter: "link", formatterParams: { urlField: "url", target: "_blank", labelField: "title" }
+    },
+    { title: "SOURCE", field: "source", minWidth: 150, headerSort: false, headerTooltip: true, vertAlign: "top" },
+  ];
+  if (!signalNewsTable) {
+    signalNewsTable = new Tabulator("#signal-news-sheet", {
+      data: signalCurrentNews,
       layout: "fitColumns",
       headerWordWrap: true,
       tooltipsHeader: true,
       tooltips: truncatedTooltip,
-      columns: [
-        {
-          title: "PUBLISHED", field: "published", minWidth: 150, headerSort: false, headerTooltip: true, vertAlign: "top",
-          formatter: function(cell) { return new Date(cell.getValue()).toLocaleString(); }
-        },
-        {
-          title: "TITLE", field: "title", minWidth: 400, headerSort: false, headerTooltip: true, vertAlign: "top",
-          formatter: "link", formatterParams: { urlField: "url", target: "_blank", labelField: "title" }
-        },
-        { title: "SOURCE", field: "source", minWidth: 150, headerSort: false, headerTooltip: true, vertAlign: "top" },
-      ],
+      columns: newsColumns,
     });
-    const filingsItems = data.filings || [];
-    new Tabulator("#signal-filings-sheet", {
-      data: filingsItems,
+  } else {
+    signalNewsTable.setData(signalCurrentNews);
+  }
+
+  const filingColumns = [
+    {
+      title: "FILED AT", field: "filedAt", minWidth: 150, headerSort: false, headerTooltip: true, vertAlign: "top",
+      formatter: function(cell) { return new Date(cell.getValue()).toLocaleString(); }
+    },
+    { title: "FORM TYPE", field: "formType", minWidth: 100, headerSort: false, headerTooltip: true, vertAlign: "top" },
+    {
+      title: "DESCRIPTION", field: "description", minWidth: 400, headerSort: false, headerTooltip: true, vertAlign: "top",
+      formatter: "link", formatterParams: { urlField: "linkToFilingDetails", target: "_blank", labelField: "description" }
+    },
+    { title: "COMPANY", field: "companyName", minWidth: 200, headerSort: false, headerTooltip: true, vertAlign: "top" },
+  ];
+  if (!signalFilingsTable) {
+    signalFilingsTable = new Tabulator("#signal-filings-sheet", {
+      data: signalCurrentFilings,
       layout: "fitColumns",
       headerWordWrap: true,
       tooltipsHeader: true,
       tooltips: truncatedTooltip,
-      columns: [
-        {
-          title: "FILED AT", field: "filedAt", minWidth: 150, headerSort: false, headerTooltip: true, vertAlign: "top",
-          formatter: function(cell) { return new Date(cell.getValue()).toLocaleString(); }
-        },
-        { title: "FORM TYPE", field: "formType", minWidth: 100, headerSort: false, headerTooltip: true, vertAlign: "top" },
-        {
-          title: "DESCRIPTION", field: "description", minWidth: 400, headerSort: false, headerTooltip: true, vertAlign: "top",
-          formatter: "link", formatterParams: { urlField: "linkToFilingDetails", target: "_blank", labelField: "description" }
-        },
-        { title: "COMPANY", field: "companyName", minWidth: 200, headerSort: false, headerTooltip: true, vertAlign: "top" },
-      ],
+      columns: filingColumns,
     });
-    if (!signalListenersAdded) {
-      document.getElementById('signal-next-candle').addEventListener('click', () => {
-        advanceSignalCandle();
-      });
-      document.getElementById('signal-copy-news').addEventListener('click', () => {
-        const jsonData = {
-          ticker: ticker,
-          news: newsItems.map(item => ({
-            published: item.published,
-            title: item.title,
-            source: item.source,
-            url: item.url
-          }))
-        };
-        navigator.clipboard.writeText(JSON.stringify(jsonData, null, 2)).then(() => {
-          alert('News JSON copied to clipboard!');
-        }).catch(err => {
-          console.error('Failed to copy: ', err);
-          alert('Failed to copy to clipboard.');
-        });
-      });
-      document.getElementById('signal-copy-filings').addEventListener('click', () => {
-        const jsonData = {
-          ticker: ticker,
-          filings: filingsItems.map(item => ({
-            filedAt: item.filedAt,
-            formType: item.formType,
-            description: item.description,
-            companyName: item.companyName,
-            url: item.linkToFilingDetails
-          }))
-        };
-        navigator.clipboard.writeText(JSON.stringify(jsonData, null, 2)).then(() => {
-          alert('SEC Filings JSON copied to clipboard!');
-        }).catch(err => {
-          console.error('Failed to copy: ', err);
-          alert('Failed to copy to clipboard.');
-        });
-      });
-      signalListenersAdded = true;
+  } else {
+    signalFilingsTable.setData(signalCurrentFilings);
+  }
+}
+
+function setupSignalListeners() {
+  if (signalListenersAdded) return;
+  document.getElementById('signal-next-candle').addEventListener('click', () => {
+    advanceSignalCandle();
+  });
+  document.getElementById('signal-copy-news').addEventListener('click', () => {
+    if (signalCurrentNews.length === 0) {
+      alert('No news data available.');
+      return;
     }
-    if (Object.keys(profile).length > 0) {
-      const profileDiv = document.getElementById('signal-profile-container');
-      profileDiv.innerHTML = `
-        <h4>Company Profile (Easy Digest for Day Traders)</h4>
-        <img src="${profile.image || ''}" alt="${profile.companyName || 'Company Logo'}">
-        <h5>${profile.companyName || 'N/A'}</h5>
-        <p><strong>Exchange:</strong> ${profile.exchange || 'N/A'}</p>
-        <p><strong>Industry:</strong> ${profile.industry || 'N/A'}</p>
-        <p><strong>Sector:</strong> ${profile.sector || 'N/A'}</p>
-        <p><strong>Country/State:</strong> ${profile.country || 'N/A'} / ${profile.state || 'N/A'}</p>
-        <p><strong>Full-time Employees:</strong> ${profile.fullTimeEmployees ? Number(profile.fullTimeEmployees).toLocaleString() : 'N/A'}</p>
-        <p><strong>Beta:</strong> ${profile.beta ? Number(profile.beta).toFixed(2) : 'N/A'}</p>
-        <p><strong>Last Dividend:</strong> ${profile.lastDividend ? Number(profile.lastDividend).toFixed(2) : 'N/A'}</p>
-        <p><strong>52W Range:</strong> ${profile.range || 'N/A'}</p>
-        <p><strong>Website:</strong> <a href="${profile.website || '#'}" target="_blank" rel="noopener noreferrer">${profile.website || 'N/A'}</a></p>
-        <p><strong>Description:</strong> ${profile.description || 'N/A'}</p>
-        <p><strong>IPO Date:</strong> ${profile.ipoDate || 'N/A'}</p>
-        <p><strong>Is ETF:</strong> ${profile.isEtf ? 'Yes' : 'No'}</p>
-      `;
+    const jsonData = {
+      ticker: ticker,
+      news: signalCurrentNews.map(item => ({
+        published: item.published,
+        title: item.title,
+        source: item.source,
+        url: item.url
+      }))
+    };
+    navigator.clipboard.writeText(JSON.stringify(jsonData, null, 2)).then(() => {
+      alert('News JSON copied to clipboard!');
+    }).catch(err => {
+      console.error('Failed to copy: ', err);
+      alert('Failed to copy to clipboard.');
+    });
+  });
+  document.getElementById('signal-copy-filings').addEventListener('click', () => {
+    if (signalCurrentFilings.length === 0) {
+      alert('No filings data available.');
+      return;
     }
-    // Resize chart after data is loaded
-    signalChart.resize(document.getElementById('signal-chart').clientWidth, 600);
+    const jsonData = {
+      ticker: ticker,
+      filings: signalCurrentFilings.map(item => ({
+        filedAt: item.filedAt,
+        formType: item.formType,
+        description: item.description,
+        companyName: item.companyName,
+        url: item.linkToFilingDetails
+      }))
+    };
+    navigator.clipboard.writeText(JSON.stringify(jsonData, null, 2)).then(() => {
+      alert('SEC Filings JSON copied to clipboard!');
+    }).catch(err => {
+      console.error('Failed to copy: ', err);
+      alert('Failed to copy to clipboard.');
+    });
+  });
+  signalListenersAdded = true;
+}
+
+function applySignalChartPayload(data) {
+  const plottedCandles = data.candles || [];
+  const plottedVolume = data.volume || [];
+  const plottedVwap = data.vwap || [];
+  const plottedSma = data.sma || [];
+  const profileMinCandles = Array.isArray(data.minCandles) ? data.minCandles.map(c => ({ ...c })) : [];
+  signalCandleSeries.setData(plottedCandles);
+  signalVolumeSeries.setData(plottedVolume);
+  signalVwapSeries.setData(plottedVwap);
+  signalSmaSeries.setData(plottedSma);
+  signalStepModeEnabled = false;
+  signalRevealCandles = [];
+  signalRevealVolume = [];
+  signalRevealVwap = [];
+  signalRevealSma = [];
+  signalProfileMinuteCandles = profileMinCandles.map(c => ({ ...c }));
+  signalVisibleCandles = 0;
+  signalMarker = null;
+  updateSignalStepControls();
+  if (hasSignalTime) {
+    const hhmm = String(timeStr).replace(':','').padStart(4,'0');
+    const ts = combineDateAndTime(date, hhmm) / 1000;
+    const isBuy = signal === "buy";
+    if (hhmm === '0930') {
+      signalMarker = null;
+      signalCandleSeries.setMarkers([]);
+    } else {
+      signalMarker = {
+        time: ts,
+        position: isBuy ? "belowBar" : "aboveBar",
+        shape: isBuy ? "arrowUp" : "arrowDown",
+        color: isBuy ? "#21c58f" : "#ff8a5a",
+        size: 2
+      };
+      signalCandleSeries.setMarkers([signalMarker]);
+    }
+    if (plottedCandles.length > 0) {
+      let initialCount = plottedCandles.filter(c => c.time <= ts).length;
+      if (initialCount < 1) initialCount = 1;
+      signalStepModeEnabled = true;
+      signalRevealCandles = plottedCandles;
+      signalRevealVolume = plottedVolume;
+      signalRevealVwap = plottedVwap;
+      signalRevealSma = plottedSma;
+      applySignalRevealData(initialCount);
+    }
+  } else {
+    signalCandleSeries.setMarkers([]);
+  }
+  setSessionVisibleRange(signalChart, date);
+  drawRthOpenLine(signalChart, document.getElementById('signal-chart'), date);
+  if (!hasSignalTime || !signalStepModeEnabled) {
+    const profileCutoff = hasSignalTime ? combineDateAndTime(date, String(timeStr).replace(':','').padStart(4,'0')) / 1000 : null;
+    updateSignalMarketProfile(profileCutoff);
+  }
+  signalChart.resize(document.getElementById('signal-chart').clientWidth, 600);
+}
+
+async function loadSignalPrimaryChart() {
+  try {
+    const { data } = await axios.get('/api/candles', { params: { ticker, timeframe, date } });
+    applySignalChartPayload(data || {});
+  } catch (err) {
+    console.warn('[loadSignalChart] fast candles fetch failed, trying chart-data fallback', err);
+    const requestParams = { ticker, resolution: timeframe, date, includeExtras: 'false' };
+    if (hasSignalTime) requestParams.time = timeStr;
+    const { data } = await axios.get('/api/chart-data', { params: requestParams });
+    applySignalChartPayload(data || {});
+  }
+}
+
+async function loadSignalProfile() {
+  try {
+    const { data } = await axios.get('/api/profile', { params: { ticker } });
+    renderSignalProfile(data || {});
+  } catch (err) {
+    const companyNameEl = document.getElementById('signal-company-name');
+    if (companyNameEl) companyNameEl.textContent = 'N/A';
+    console.warn('[signalProfile] unavailable', err?.response?.data || err.message);
+  }
+}
+
+async function loadSignalExtras() {
+  try {
+    const { data } = await axios.get('/api/extra', { params: { ticker, date, days: 2, profile: 'false' } });
+    renderSignalNewsAndFilings(data?.news || [], data?.filings || []);
+  } catch (err) {
+    console.warn('[signalExtra] unavailable', err?.response?.data || err.message);
+  }
+}
+
+async function loadSignalMetrics() {
+  const requestParams = { ticker, resolution: timeframe, date, includeExtras: 'false' };
+  if (hasSignalTime) requestParams.time = timeStr;
+  try {
+    const { data } = await axios.get('/api/chart-data', { params: requestParams });
+    const metrics = data.metrics || {};
+    const row = buildSignalMetricsRow(metrics);
+    renderSignalMetricsRow(row);
+
+    let d = new Date(date);
+    d.setDate(d.getDate() - 1);
+    while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() - 1);
+    const priorDate = d.toISOString().split('T')[0];
+    fetchMarketCap(ticker).then(value => {
+      row.market_cap = value;
+      renderSignalMetricsRow(row);
+    }).catch(err => console.warn('[signalMetrics] market cap unavailable', err?.response?.data || err.message));
+    fetchFloat(ticker).then(value => {
+      row.float = value;
+      renderSignalMetricsRow(row);
+    }).catch(err => console.warn('[signalMetrics] float unavailable', err?.response?.data || err.message));
+    calculatePreMarketVolume(ticker, date, priorDate).then(value => {
+      row.pre_market_volume = Math.round(value).toLocaleString();
+      renderSignalMetricsRow(row);
+    }).catch(err => console.warn('[signalMetrics] pre-market volume unavailable', err?.response?.data || err.message));
+  } catch (err) {
+    console.warn('[signalMetrics] unavailable', err?.response?.data || err.message);
+    renderSignalMetricsRow(buildSignalMetricsRow({}));
+  }
+}
+async function loadSignalChart() {
+  try {
+    initSignalChart();
+    setupSignalKeyNavigation();
+    setupSignalListeners();
+    renderSignalMetricsRow(buildSignalMetricsRow({}));
+    renderSignalNewsAndFilings([], []);
+
+    loadSignalProfile();
+    loadSignalExtras();
+    if (marketauxEnabled) {
+      displayMarketRadar('signal', ticker, date);
+    }
+    await loadSignalPrimaryChart();
+    loadSignalMetrics();
   } catch (err) {
     const companyNameEl = document.getElementById('signal-company-name');
     if (companyNameEl) {
@@ -2062,7 +2162,7 @@ function mpRenderCard(title, dateStr, built, axisRows = []) {
   const renderRows = axisRows.length ? axisRows : p.rows;
   const rowsByIdx = new Map(p.rows.map(row => [row.idx, row]));
   const status = p.isComplete ? "Complete RTH" : `RTH through ${mpMinuteLabel(p.lastMinute)} ET`;
-  const lastContext = !p.isComplete ? mpLastPriceContext(p) : null;
+  const lastContext = mpLastPriceContext(p);
   const periodLabels = MP_PERIOD_LABELS.map((label, i) => `<span class="mp-period-label ${i < 2 ? "ib" : ""}">${label}</span>`).join("");
   const headerHtml = `
     <div class="mp-grid-header">
@@ -2081,7 +2181,7 @@ function mpRenderCard(title, dateStr, built, axisRows = []) {
       isPoc ? '<span class="mp-tag mp-tag-poc">POC</span>' : "",
       row.idx === p.valueHighIdx ? '<span class="mp-tag mp-tag-va">VAH</span>' : "",
       row.idx === p.valueLowIdx ? '<span class="mp-tag mp-tag-va">VAL</span>' : "",
-      isLastPrice ? `<span class="mp-tag mp-tag-last">LAST ${mpFormatPrice(p.lastClose)}</span>` : ""
+      isLastPrice ? `<span class="mp-tag mp-tag-last">${p.isComplete ? "CLOSE" : "LAST"} ${mpFormatPrice(p.lastClose)}</span>` : ""
     ].join("");
     const cells = MP_PERIOD_LABELS.map((label, i) => {
       const active = activePeriods.has(i);
@@ -2120,7 +2220,7 @@ function mpRenderCard(title, dateStr, built, axisRows = []) {
         </div>
         ${lastContext ? `
         <div class="mp-stat">
-          <div class="mp-stat-label">Last Price</div>
+          <div class="mp-stat-label">${p.isComplete ? "Close Price" : "Last Price"}</div>
           <div class="mp-stat-value">${mpEscape(lastContext.text)}</div>
           <div class="mp-stat-help">${mpEscape(lastContext.valueHelp)}</div>
         </div>

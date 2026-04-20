@@ -1123,7 +1123,7 @@ function mpRenderCard(title, dateStr, built, axisRows = []) {
   const renderRows = axisRows.length ? axisRows : p.rows;
   const rowsByIdx = new Map(p.rows.map(row => [row.idx, row]));
   const status = p.isComplete ? "Complete RTH" : `RTH through ${mpMinuteLabel(p.lastMinute)} ET`;
-  const lastContext = !p.isComplete ? mpLastPriceContext(p) : null;
+  const lastContext = mpLastPriceContext(p);
   const periodLabels = MP_PERIOD_LABELS.map((label, i) => `<span class="mp-period-label ${i < 2 ? "ib" : ""}">${label}</span>`).join("");
   const headerHtml = `
     <div class="mp-grid-header">
@@ -1142,7 +1142,7 @@ function mpRenderCard(title, dateStr, built, axisRows = []) {
       isPoc ? '<span class="mp-tag mp-tag-poc">POC</span>' : "",
       row.idx === p.valueHighIdx ? '<span class="mp-tag mp-tag-va">VAH</span>' : "",
       row.idx === p.valueLowIdx ? '<span class="mp-tag mp-tag-va">VAL</span>' : "",
-      isLastPrice ? `<span class="mp-tag mp-tag-last">LAST ${mpFormatPrice(p.lastClose)}</span>` : ""
+      isLastPrice ? `<span class="mp-tag mp-tag-last">${p.isComplete ? "CLOSE" : "LAST"} ${mpFormatPrice(p.lastClose)}</span>` : ""
     ].join("");
     const cells = MP_PERIOD_LABELS.map((label, i) => {
       const active = activePeriods.has(i);
@@ -1181,7 +1181,7 @@ function mpRenderCard(title, dateStr, built, axisRows = []) {
         </div>
         ${lastContext ? `
         <div class="mp-stat">
-          <div class="mp-stat-label">Last Price</div>
+          <div class="mp-stat-label">${p.isComplete ? "Close Price" : "Last Price"}</div>
           <div class="mp-stat-value">${mpEscape(lastContext.text)}</div>
           <div class="mp-stat-help">${mpEscape(lastContext.valueHelp)}</div>
         </div>

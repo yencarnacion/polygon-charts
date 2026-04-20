@@ -963,10 +963,14 @@ func candlesHandler(w http.ResponseWriter, r *http.Request) {
 	var minBars []polygonBar
 	var minErr error
 	if span != "day" {
-		minBars, minErr = queryPolygon(symbol, 1, "minute", from, to)
-		if minErr != nil {
-			http.Error(w, minErr.Error(), 502)
-			return
+		if span == "minute" && mult == 1 {
+			minBars = bars
+		} else {
+			minBars, minErr = queryPolygon(symbol, 1, "minute", from, to)
+			if minErr != nil {
+				http.Error(w, minErr.Error(), 502)
+				return
+			}
 		}
 	}
 	minCandles := make([]candlePoint, 0)
@@ -1044,6 +1048,27 @@ func shareFloatHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(floats)
 }
 
+func profileHandler(w http.ResponseWriter, r *http.Request) {
+	ticker := strings.ToUpper(strings.TrimSpace(r.URL.Query().Get("ticker")))
+	if ticker == "" {
+		http.Error(w, "ticker required", 400)
+		return
+	}
+	profile, err := queryFMPProfile(ticker)
+	if err != nil {
+		http.Error(w, err.Error(), 502)
+		return
+	}
+	var profileData map[string]interface{}
+	if len(profile) > 0 {
+		profileData = profile[0]
+	} else {
+		profileData = map[string]interface{}{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(profileData)
+}
+
 func extraHandler(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	ticker := strings.ToUpper(q.Get("ticker"))
@@ -1059,6 +1084,7 @@ func extraHandler(w http.ResponseWriter, r *http.Request) {
 	var allNewsItems []NewsItem
 	var allFilings []map[string]interface{}
 	var profile []map[string]interface{}
+	includeProfile := strings.ToLower(strings.TrimSpace(q.Get("profile"))) != "false"
 	// Fetch for current day
 	pNews, _ := queryMassiveBenzingaNews(ticker, dateStr)
 	allNewsItems = appendMassiveNewsItems(allNewsItems, pNews)
@@ -1105,7 +1131,9 @@ func extraHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	filings, _ := querySECFilings(ticker, dateStr)
 	allFilings = append(allFilings, filings...)
-	profile, _ = queryFMPProfile(ticker)
+	if includeProfile {
+		profile, _ = queryFMPProfile(ticker)
+	}
 	// Fetch for prior day if days=2
 	if days == 2 {
 		priorStr, err := getPriorTradingDate(ticker, dateStr)
@@ -1668,56 +1696,17 @@ func chartDataHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	priorClose, priorVolume := getPriorDayData(symbol, dateStr)
 	metrics := calculateMetrics(extendedCandles, extendedVolume, priorClose, priorVolume)
-	var allNewsItems []NewsItem
+	includeExtras := strings.ToLower(strings.TrimSpace(q.Get("includeExtras"))) != "false"
+	uniqueNews := []NewsItem{}
 	var allFilings []map[string]interface{}
-	// Fetch current day
-	pNews, _ := queryMassiveBenzingaNews(symbol, dateStr)
-	allNewsItems = appendMassiveNewsItems(allNewsItems, pNews)
-	fNews, _ := queryFMPNews(symbol, dateStr)
-	for _, f := range fNews {
-		val, exists := f["title"]
-		if !exists || val == nil {
-			continue
-		}
-		title, ok := val.(string)
-		if !ok {
-			continue
-		}
-		val, exists = f["site"]
-		if !exists || val == nil {
-			continue
-		}
-		site, ok := val.(string)
-		if !ok {
-			continue
-		}
-		val, exists = f["url"]
-		if !exists || val == nil {
-			continue
-		}
-		url, ok := val.(string)
-		if !ok {
-			continue
-		}
-		val, exists = f["publishedDate"]
-		if !exists || val == nil {
-			continue
-		}
-		pub, ok := val.(string)
-		if !ok {
-			continue
-		}
-		allNewsItems = append(allNewsItems, NewsItem{Title: title, Source: site, URL: url, Published: normalizePublished(pub)})
-	}
-	filings, _ := querySECFilings(symbol, dateStr)
-	allFilings = append(allFilings, filings...)
-	// Fetch prior day
-	priorStr, err := getPriorTradingDate(symbol, dateStr)
-	if err == nil {
-		pNewsPrior, _ := queryMassiveBenzingaNews(symbol, priorStr)
-		allNewsItems = appendMassiveNewsItems(allNewsItems, pNewsPrior)
-		fNewsPrior, _ := queryFMPNews(symbol, priorStr)
-		for _, f := range fNewsPrior {
+	var profileData map[string]interface{}
+	if includeExtras {
+		var allNewsItems []NewsItem
+		// Fetch current day
+		pNews, _ := queryMassiveBenzingaNews(symbol, dateStr)
+		allNewsItems = appendMassiveNewsItems(allNewsItems, pNews)
+		fNews, _ := queryFMPNews(symbol, dateStr)
+		for _, f := range fNews {
 			val, exists := f["title"]
 			if !exists || val == nil {
 				continue
@@ -1752,33 +1741,75 @@ func chartDataHandler(w http.ResponseWriter, r *http.Request) {
 			}
 			allNewsItems = append(allNewsItems, NewsItem{Title: title, Source: site, URL: url, Published: normalizePublished(pub)})
 		}
-		filingsPrior, _ := querySECFilings(symbol, priorStr)
-		allFilings = append(allFilings, filingsPrior...)
-	}
-	// Deduplicate and sort news
-	allNewsItems = filterTradeableNews(allNewsItems)
-	uniqueMap := make(map[string]NewsItem)
-	for _, n := range allNewsItems {
-		uniqueMap[n.URL] = n
-	}
-	uniqueNews := []NewsItem{}
-	for _, n := range uniqueMap {
-		uniqueNews = append(uniqueNews, n)
-	}
-	sort.Slice(uniqueNews, func(i, j int) bool {
-		return isNewsNewer(uniqueNews[i], uniqueNews[j])
-	})
-	// Sort filings
-	sort.Slice(allFilings, func(i, j int) bool {
-		ti := parsePublished(allFilings[i]["filedAt"].(string))
-		tj := parsePublished(allFilings[j]["filedAt"].(string))
-		return ti.After(tj)
-	})
-	var profile []map[string]interface{}
-	profile, _ = queryFMPProfile(symbol)
-	var profileData map[string]interface{}
-	if len(profile) > 0 {
-		profileData = profile[0]
+		filings, _ := querySECFilings(symbol, dateStr)
+		allFilings = append(allFilings, filings...)
+		// Fetch prior day
+		priorStr, err := getPriorTradingDate(symbol, dateStr)
+		if err == nil {
+			pNewsPrior, _ := queryMassiveBenzingaNews(symbol, priorStr)
+			allNewsItems = appendMassiveNewsItems(allNewsItems, pNewsPrior)
+			fNewsPrior, _ := queryFMPNews(symbol, priorStr)
+			for _, f := range fNewsPrior {
+				val, exists := f["title"]
+				if !exists || val == nil {
+					continue
+				}
+				title, ok := val.(string)
+				if !ok {
+					continue
+				}
+				val, exists = f["site"]
+				if !exists || val == nil {
+					continue
+				}
+				site, ok := val.(string)
+				if !ok {
+					continue
+				}
+				val, exists = f["url"]
+				if !exists || val == nil {
+					continue
+				}
+				url, ok := val.(string)
+				if !ok {
+					continue
+				}
+				val, exists = f["publishedDate"]
+				if !exists || val == nil {
+					continue
+				}
+				pub, ok := val.(string)
+				if !ok {
+					continue
+				}
+				allNewsItems = append(allNewsItems, NewsItem{Title: title, Source: site, URL: url, Published: normalizePublished(pub)})
+			}
+			filingsPrior, _ := querySECFilings(symbol, priorStr)
+			allFilings = append(allFilings, filingsPrior...)
+		}
+		// Deduplicate and sort news
+		allNewsItems = filterTradeableNews(allNewsItems)
+		uniqueMap := make(map[string]NewsItem)
+		for _, n := range allNewsItems {
+			uniqueMap[n.URL] = n
+		}
+		for _, n := range uniqueMap {
+			uniqueNews = append(uniqueNews, n)
+		}
+		sort.Slice(uniqueNews, func(i, j int) bool {
+			return isNewsNewer(uniqueNews[i], uniqueNews[j])
+		})
+		// Sort filings
+		sort.Slice(allFilings, func(i, j int) bool {
+			ti := parsePublished(allFilings[i]["filedAt"].(string))
+			tj := parsePublished(allFilings[j]["filedAt"].(string))
+			return ti.After(tj)
+		})
+		var profile []map[string]interface{}
+		profile, _ = queryFMPProfile(symbol)
+		if len(profile) > 0 {
+			profileData = profile[0]
+		}
 	}
 	out := map[string]interface{}{
 		"candles":    candles,
@@ -1910,6 +1941,7 @@ func main() {
 	http.HandleFunc("/api/candles", candlesHandler)
 	http.HandleFunc("/api/ticker-details", tickerDetailsHandler)
 	http.HandleFunc("/api/share-float", shareFloatHandler)
+	http.HandleFunc("/api/profile", profileHandler)
 	http.HandleFunc("/api/extra", extraHandler)
 	http.HandleFunc("/api/market-stats", marketStatsHandler)
 	http.HandleFunc("/chart", chartHandler)
