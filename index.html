@@ -215,7 +215,7 @@
     }
     .mp-summary {
       display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(135px, 1fr));
       gap: 0.5rem;
       margin-bottom: 0.75rem;
     }
@@ -264,6 +264,10 @@
     }
     .mp-row.mp-value-area { background: rgba(79, 167, 255, 0.09); }
     .mp-row.mp-poc { background: rgba(255, 209, 102, 0.14); }
+    .mp-row.mp-last-price {
+      box-shadow: inset 0 0 0 2px rgba(233, 241, 251, 0.88);
+      background-image: linear-gradient(90deg, rgba(233, 241, 251, 0.12), transparent 52%);
+    }
     .mp-price {
       color: var(--muted);
       font-size: 0.74rem;
@@ -294,6 +298,20 @@
       font-size: 0.58rem;
       line-height: 1;
     }
+    .mp-period-label.ib {
+      color: #d9fff0;
+      font-weight: 700;
+    }
+    .mp-period-label.ib::after {
+      content: "IB";
+      display: block;
+      margin-top: 2px;
+      color: #081421;
+      background: #a7f3d0;
+      border-radius: 3px;
+      font-size: 0.48rem;
+      line-height: 1.15;
+    }
     .mp-tpo-cell {
       height: 14px;
       border: 1px solid rgba(103, 129, 159, 0.34);
@@ -306,10 +324,19 @@
       font-weight: 700;
       font-variant-numeric: tabular-nums;
     }
+    .mp-tpo-cell.ib {
+      background: rgba(33, 197, 143, 0.08);
+      border-color: rgba(167, 243, 208, 0.52);
+    }
     .mp-tpo-cell.active {
       background: #67819f;
       border-color: rgba(142, 208, 255, 0.45);
       color: #f2f7ff;
+    }
+    .mp-tpo-cell.active.ib {
+      outline: 2px solid rgba(233, 241, 251, 0.82);
+      outline-offset: -2px;
+      box-shadow: 0 0 0 1px rgba(167, 243, 208, 0.58);
     }
     .mp-row.mp-value-area .mp-tpo-cell.active {
       background: #4fa7ff;
@@ -337,6 +364,7 @@
     }
     .mp-tag-poc { background: var(--warning); }
     .mp-tag-va { background: #8ed0ff; }
+    .mp-tag-last { background: #e9f1fb; }
     .mp-empty {
       color: var(--muted);
       border: 1px dashed var(--border);
@@ -925,6 +953,8 @@ function mpComputeFromRth(rthCandles, forcedTick = null) {
   }
 
   const lastMinute = Math.max(...rthCandles.map(c => mpEtMinute(c.time)));
+  const lastCandle = rthCandles[rthCandles.length - 1];
+  const lastClose = lastCandle ? lastCandle.close : NaN;
   return {
     rows,
     totalTpos,
@@ -942,6 +972,8 @@ function mpComputeFromRth(rthCandles, forcedTick = null) {
     valueTpos,
     abovePoc,
     belowPoc,
+    lastClose,
+    lastCloseIdx: Number.isFinite(lastClose) ? Math.floor(lastClose / tick) : null,
     lastMinute,
     isComplete: lastMinute >= MP_RTH_END - 1
   };
@@ -1000,6 +1032,29 @@ function mpBuildAxisRows(...profiles) {
     rows.push({ idx, price: idx * tick });
   }
   return rows;
+}
+
+function mpLastPriceContext(profile) {
+  if (!profile || !Number.isFinite(Number(profile.lastClose))) return null;
+  const last = Number(profile.lastClose);
+  let valueLabel = "Inside value";
+  let valueHelp = "Price is trading inside the accepted value area.";
+  if (last > profile.valueHigh) {
+    valueLabel = "Above value";
+    valueHelp = "Price is auctioning above yesterday/today's accepted area.";
+  } else if (last < profile.valueLow) {
+    valueLabel = "Below value";
+    valueHelp = "Price is auctioning below the accepted area.";
+  }
+  let pocLabel = "at POC";
+  if (last > profile.pocPrice) pocLabel = "above POC";
+  if (last < profile.pocPrice) pocLabel = "below POC";
+  return {
+    valueLabel,
+    valueHelp,
+    pocLabel,
+    text: `${mpFormatPrice(last)} - ${valueLabel}, ${pocLabel}`
+  };
 }
 
 async function mpFetchPriorTradingDate(ticker, dateStr) {
@@ -1068,7 +1123,8 @@ function mpRenderCard(title, dateStr, built, axisRows = []) {
   const renderRows = axisRows.length ? axisRows : p.rows;
   const rowsByIdx = new Map(p.rows.map(row => [row.idx, row]));
   const status = p.isComplete ? "Complete RTH" : `RTH through ${mpMinuteLabel(p.lastMinute)} ET`;
-  const periodLabels = MP_PERIOD_LABELS.map(label => `<span class="mp-period-label">${label}</span>`).join("");
+  const lastContext = !p.isComplete ? mpLastPriceContext(p) : null;
+  const periodLabels = MP_PERIOD_LABELS.map((label, i) => `<span class="mp-period-label ${i < 2 ? "ib" : ""}">${label}</span>`).join("");
   const headerHtml = `
     <div class="mp-grid-header">
       <span>Price</span>
@@ -1080,21 +1136,23 @@ function mpRenderCard(title, dateStr, built, axisRows = []) {
     const row = rowsByIdx.get(axisRow.idx) || { idx: axisRow.idx, price: axisRow.price, count: 0, periods: [] };
     const isPoc = row.idx === p.pocIdx;
     const isVA = row.idx >= p.valueLowIdx && row.idx <= p.valueHighIdx;
+    const isLastPrice = lastContext && row.idx === p.lastCloseIdx;
     const activePeriods = new Set(row.periods || []);
     const tags = [
       isPoc ? '<span class="mp-tag mp-tag-poc">POC</span>' : "",
       row.idx === p.valueHighIdx ? '<span class="mp-tag mp-tag-va">VAH</span>' : "",
-      row.idx === p.valueLowIdx ? '<span class="mp-tag mp-tag-va">VAL</span>' : ""
+      row.idx === p.valueLowIdx ? '<span class="mp-tag mp-tag-va">VAL</span>' : "",
+      isLastPrice ? `<span class="mp-tag mp-tag-last">LAST ${mpFormatPrice(p.lastClose)}</span>` : ""
     ].join("");
     const cells = MP_PERIOD_LABELS.map((label, i) => {
       const active = activePeriods.has(i);
       const start = MP_RTH_START + i * MP_PERIOD_MINUTES;
       const end = start + MP_PERIOD_MINUTES;
-      const title = `${label}: ${mpMinuteLabel(start)}-${mpMinuteLabel(end)} ET`;
-      return `<span class="mp-tpo-cell ${active ? "active" : ""}" title="${mpEscape(title)}">${active ? label : ""}</span>`;
+      const title = `${label}: ${mpMinuteLabel(start)}-${mpMinuteLabel(end)} ET${i < 2 ? " (Initial Balance)" : ""}`;
+      return `<span class="mp-tpo-cell ${active ? "active" : ""} ${i < 2 ? "ib" : ""}" title="${mpEscape(title)}">${active ? label : ""}</span>`;
     }).join("");
     return `
-      <div class="mp-row ${isVA ? "mp-value-area" : ""} ${isPoc ? "mp-poc" : ""}">
+      <div class="mp-row ${isVA ? "mp-value-area" : ""} ${isPoc ? "mp-poc" : ""} ${isLastPrice ? "mp-last-price" : ""}">
         <div class="mp-price">${mpFormatPrice(row.price)}${tags}</div>
         <div class="mp-tpo-grid" style="--periods:${MP_PERIOD_LABELS.length}" aria-label="TPO prints by 30-minute period">${cells}</div>
         <div class="mp-count">${row.count}</div>
@@ -1121,6 +1179,13 @@ function mpRenderCard(title, dateStr, built, axisRows = []) {
           <div class="mp-stat-value">${p.abovePoc}:${p.belowPoc}</div>
           <div class="mp-stat-help">Time accepted above vs. below fair price. More above suggests buyers accepted higher prices; more below suggests sellers kept trade lower.</div>
         </div>
+        ${lastContext ? `
+        <div class="mp-stat">
+          <div class="mp-stat-label">Last Price</div>
+          <div class="mp-stat-value">${mpEscape(lastContext.text)}</div>
+          <div class="mp-stat-help">${mpEscape(lastContext.valueHelp)}</div>
+        </div>
+        ` : ""}
       </div>
       <div class="mp-profile">${headerHtml}${rowsHtml}</div>
       ${mpRenderEvolution(built.evolution)}
@@ -1165,7 +1230,7 @@ async function renderMarketProfiles(containerId, ticker, dateStr, currentCandles
       <div class="market-profile-head">
         <div>
           <h4>Market Profile (RTH Only)</h4>
-          <p class="market-profile-note">Previous day is on the left. Both profiles share the same price ladder, so today can be read directly against prior value. Each cell is one 30-minute TPO period, A-M from 09:30 to 16:00 ET.</p>
+          <p class="market-profile-note">Previous day is on the left. Both profiles share the same price ladder, so today can be read directly against prior value. A and B are outlined as Initial Balance, the first hour when the session's early auction range is set.</p>
         </div>
         <div class="mp-legend">
           <span><span class="mp-dot poc"></span>POC</span>
