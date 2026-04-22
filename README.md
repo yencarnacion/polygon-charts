@@ -18,6 +18,30 @@ Default app URL: `http://localhost:8081`
 
 `MARKETAUX_API_KEY` is optional. When it is not set, the Marketaux Catalyst Radar panels (`/api/market-stats`) are hidden on both pages so the UI stays uncluttered.
 
+## ntfy Push Notes
+
+The ntfy integration is disabled by default. Enable it in `.env`:
+
+```bash
+NTFY_ENABLED=true
+NTFY_SERVER=push.example.com
+NTFY_TOPIC=hello
+```
+
+If you need to post to a non-TLS server, include the scheme explicitly, e.g. `NTFY_SERVER=http://push.example.com`.
+
+The quick-send checkboxes on the chart page come from `config.yaml`:
+
+```yaml
+ntfy:
+  tags:
+    - morning top
+    - morning bottom
+    - rubber band
+    - right side of the v
+    - flush base
+```
+
 ## URL API For Deep Links
 
 You can open a chart directly from a clickable URL using ticker/date, with optional time.

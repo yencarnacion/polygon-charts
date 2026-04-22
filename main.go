@@ -20,8 +20,10 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/joho/godotenv"
+	"gopkg.in/yaml.v3"
 )
 
 var (
@@ -36,8 +38,20 @@ var (
 	marketauxAPIKey  string
 	marketauxEnabled bool
 	patternfolioURL  string
+	ntfyEnabled      bool
+	ntfyServer       string
+	ntfyTopic        string
+	ntfyTagOptions   []string
 	listenPort       int
 )
+
+var defaultNtfyTagOptions = []string{
+	"morning top",
+	"morning bottom",
+	"rubber band",
+	"right side of the v",
+	"flush base",
+}
 
 var marketNewsLocation = func() *time.Location {
 	loc, err := time.LoadLocation("America/New_York")
@@ -116,6 +130,33 @@ type marketauxEntityStat struct {
 	TotalDocuments int     `json:"total_documents"`
 	SentimentAvg   float64 `json:"sentiment_avg"`
 	Score          float64 `json:"score"`
+}
+
+type appConfig struct {
+	Ntfy ntfyConfig `yaml:"ntfy"`
+}
+
+type ntfyConfig struct {
+	Tags []string `yaml:"tags"`
+}
+
+type ntfyPublishRequest struct {
+	PageURL string   `json:"pageUrl"`
+	Note    string   `json:"note"`
+	Tags    []string `json:"tags"`
+}
+
+type ntfyPublishResponse struct {
+	OK          bool   `json:"ok"`
+	Server      string `json:"server"`
+	Topic       string `json:"topic"`
+	MessageID   string `json:"messageId,omitempty"`
+	PublishedAt string `json:"publishedAt,omitempty"`
+}
+
+type ntfyAPIResponse struct {
+	ID   string `json:"id"`
+	Time int64  `json:"time"`
 }
 
 func marketauxDateTimeUTC(t time.Time) string {
@@ -772,6 +813,268 @@ func isNewsNewer(a, b NewsItem) bool {
 	return a.URL < b.URL
 }
 
+func envBool(key string) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(key))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizeNtfyServer(raw string) string {
+	server := strings.TrimSpace(raw)
+	if server == "" {
+		server = "push.example.com"
+	}
+	if !strings.Contains(server, "://") {
+		server = "https://" + server
+	}
+	return strings.TrimRight(server, "/")
+}
+
+func cleanStringSlice(values []string) []string {
+	out := make([]string, 0, len(values))
+	seen := make(map[string]bool, len(values))
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			continue
+		}
+		key := strings.ToLower(trimmed)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, trimmed)
+	}
+	return out
+}
+
+func loadAppConfig(path string) appConfig {
+	cfg := appConfig{
+		Ntfy: ntfyConfig{
+			Tags: append([]string(nil), defaultNtfyTagOptions...),
+		},
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			log.Printf("config.yaml read error: %v", err)
+		}
+		return cfg
+	}
+	var parsed appConfig
+	if err := yaml.Unmarshal(data, &parsed); err != nil {
+		log.Printf("config.yaml parse error: %v", err)
+		return cfg
+	}
+	if tags := cleanStringSlice(parsed.Ntfy.Tags); len(tags) > 0 {
+		cfg.Ntfy.Tags = tags
+	}
+	return cfg
+}
+
+func jsValue(v interface{}) string {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return "null"
+	}
+	return string(b)
+}
+
+func ntfyEnabledClass() string {
+	if ntfyEnabled {
+		return ""
+	}
+	return "d-none"
+}
+
+func applySharedTemplateVars(html string) string {
+	html = strings.ReplaceAll(html, "{{PATTERNFOLIO_URL}}", patternfolioURL)
+	html = strings.ReplaceAll(html, "{{MARKETAUX_ENABLED}}", strconv.FormatBool(marketauxEnabled))
+	html = strings.ReplaceAll(html, "{{NTFY_ENABLED}}", strconv.FormatBool(ntfyEnabled))
+	html = strings.ReplaceAll(html, "{{NTFY_SERVER_JSON}}", jsValue(ntfyServer))
+	html = strings.ReplaceAll(html, "{{NTFY_TOPIC_JSON}}", jsValue(ntfyTopic))
+	html = strings.ReplaceAll(html, "{{NTFY_TAG_OPTIONS_JSON}}", jsValue(ntfyTagOptions))
+	html = strings.ReplaceAll(html, "{{NTFY_ENABLED_CLASS}}", ntfyEnabledClass())
+	return html
+}
+
+func normalizePageURL(raw string) (string, error) {
+	pageURL := strings.TrimSpace(raw)
+	if pageURL == "" {
+		return "", fmt.Errorf("page URL is required")
+	}
+	u, err := url.Parse(pageURL)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return "", fmt.Errorf("page URL must be absolute")
+	}
+	switch u.Scheme {
+	case "http", "https":
+	default:
+		return "", fmt.Errorf("page URL must use http or https")
+	}
+	return u.String(), nil
+}
+
+func filterSelectedNtfyTags(selected []string) []string {
+	selectedSet := make(map[string]bool, len(selected))
+	for _, raw := range selected {
+		key := strings.ToLower(strings.TrimSpace(raw))
+		if key != "" {
+			selectedSet[key] = true
+		}
+	}
+	out := make([]string, 0, len(selectedSet))
+	for _, option := range ntfyTagOptions {
+		key := strings.ToLower(strings.TrimSpace(option))
+		if selectedSet[key] {
+			out = append(out, option)
+		}
+	}
+	return out
+}
+
+func ntfyHeaderTag(label string) string {
+	var b strings.Builder
+	prevDash := false
+	for _, r := range strings.ToLower(strings.TrimSpace(label)) {
+		switch {
+		case unicode.IsLetter(r) || unicode.IsDigit(r):
+			b.WriteRune(r)
+			prevDash = false
+		case !prevDash && b.Len() > 0:
+			b.WriteByte('-')
+			prevDash = true
+		}
+	}
+	return strings.Trim(b.String(), "-")
+}
+
+func buildNtfyHeaderTags(tags []string) string {
+	out := make([]string, 0, len(tags))
+	seen := make(map[string]bool, len(tags))
+	for _, tag := range tags {
+		headerTag := ntfyHeaderTag(tag)
+		if headerTag == "" || seen[headerTag] {
+			continue
+		}
+		seen[headerTag] = true
+		out = append(out, headerTag)
+	}
+	return strings.Join(out, ",")
+}
+
+func buildNtfyTitle(pageURL string) string {
+	u, err := url.Parse(pageURL)
+	if err != nil {
+		return "Trade note"
+	}
+	q := u.Query()
+	parts := []string{}
+	if ticker := strings.ToUpper(strings.TrimSpace(q.Get("ticker"))); ticker != "" {
+		parts = append(parts, ticker)
+	}
+	if signal := strings.ToUpper(strings.TrimSpace(q.Get("signal"))); signal != "" {
+		parts = append(parts, signal)
+	}
+	if timeStr, err := normalizeHHMM(q.Get("time")); err == nil && timeStr != "" {
+		parts = append(parts, timeStr)
+	}
+	if dateStr := strings.TrimSpace(q.Get("date")); dateStr != "" {
+		parts = append(parts, dateStr)
+	}
+	if len(parts) == 0 {
+		return "Trade note"
+	}
+	return strings.Join(parts, " ")
+}
+
+func buildNtfyMarkdown(pageURL, note string, tags []string) string {
+	lines := []string{"## Trade Note", ""}
+	if len(tags) > 0 {
+		lines = append(lines, fmt.Sprintf("**Tags:** %s", strings.Join(tags, ", ")), "")
+	}
+	trimmedNote := strings.TrimSpace(note)
+	if trimmedNote != "" {
+		lines = append(lines, "**Notes**", trimmedNote, "")
+	}
+	lines = append(lines,
+		fmt.Sprintf("**Chart:** [Open signal chart](%s)", pageURL),
+		"",
+		pageURL,
+	)
+	return strings.Join(lines, "\n")
+}
+
+func ntfyPublishHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !ntfyEnabled {
+		http.Error(w, "ntfy is disabled", http.StatusNotFound)
+		return
+	}
+	var reqBody ntfyPublishRequest
+	if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
+		http.Error(w, "invalid JSON body", http.StatusBadRequest)
+		return
+	}
+	pageURL, err := normalizePageURL(reqBody.PageURL)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	selectedTags := filterSelectedNtfyTags(reqBody.Tags)
+	message := buildNtfyMarkdown(pageURL, reqBody.Note, selectedTags)
+	endpoint := fmt.Sprintf("%s/%s", strings.TrimRight(ntfyServer, "/"), url.PathEscape(ntfyTopic))
+	req, err := http.NewRequest(http.MethodPost, endpoint, strings.NewReader(message))
+	if err != nil {
+		http.Error(w, "failed to build ntfy request", http.StatusInternalServerError)
+		return
+	}
+	req.Header.Set("Content-Type", "text/markdown; charset=utf-8")
+	req.Header.Set("Markdown", "yes")
+	req.Header.Set("Title", buildNtfyTitle(pageURL))
+	req.Header.Set("Click", pageURL)
+	req.Header.Set("Accept", "application/json")
+	if headerTags := buildNtfyHeaderTags(selectedTags); headerTags != "" {
+		req.Header.Set("Tags", headerTags)
+	}
+	client := &http.Client{Timeout: 8 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		http.Error(w, "failed to reach ntfy server: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		message := strings.TrimSpace(string(body))
+		if message == "" {
+			message = resp.Status
+		}
+		http.Error(w, "ntfy publish failed: "+message, http.StatusBadGateway)
+		return
+	}
+	var ntfyResp ntfyAPIResponse
+	_ = json.Unmarshal(body, &ntfyResp)
+	publishedAt := ""
+	if ntfyResp.Time > 0 {
+		publishedAt = time.Unix(ntfyResp.Time, 0).UTC().Format(time.RFC3339)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(ntfyPublishResponse{
+		OK:          true,
+		Server:      ntfyServer,
+		Topic:       ntfyTopic,
+		MessageID:   ntfyResp.ID,
+		PublishedAt: publishedAt,
+	})
+}
+
 func openBrowser(u string) {
 	if err := exec.Command("google-chrome", "--new-tab", u).Start(); err != nil {
 		_ = exec.Command("xdg-open", u).Start()
@@ -780,9 +1083,7 @@ func openBrowser(u string) {
 
 func rootHandler(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/html")
-	html := indexHTML
-	html = strings.ReplaceAll(html, "{{PATTERNFOLIO_URL}}", patternfolioURL)
-	html = strings.ReplaceAll(html, "{{MARKETAUX_ENABLED}}", strconv.FormatBool(marketauxEnabled))
+	html := applySharedTemplateVars(indexHTML)
 	fmt.Fprint(w, html)
 }
 
@@ -1523,8 +1824,7 @@ func chartHandler(w http.ResponseWriter, r *http.Request) {
 	html = strings.ReplaceAll(html, "{{SIGNAL}}", signal)
 	html = strings.ReplaceAll(html, "{{SIGNAL_LABEL}}", strings.ToUpper(signal))
 	html = strings.ReplaceAll(html, "{{RESOLUTION}}", resolution)
-	html = strings.ReplaceAll(html, "{{PATTERNFOLIO_URL}}", patternfolioURL)
-	html = strings.ReplaceAll(html, "{{MARKETAUX_ENABLED}}", strconv.FormatBool(marketauxEnabled))
+	html = applySharedTemplateVars(html)
 	fmt.Fprint(w, html)
 }
 
@@ -1925,6 +2225,17 @@ func main() {
 		marketauxAPIKey = strings.TrimSpace(os.Getenv("MARKETAUX_API_TOKEN"))
 	}
 	marketauxEnabled = marketauxAPIKey != ""
+	appCfg := loadAppConfig("config.yaml")
+	ntfyEnabled = envBool("NTFY_ENABLED")
+	ntfyServer = normalizeNtfyServer(os.Getenv("NTFY_SERVER"))
+	ntfyTopic = strings.TrimSpace(os.Getenv("NTFY_TOPIC"))
+	if ntfyTopic == "" {
+		ntfyTopic = "hello"
+	}
+	ntfyTagOptions = cleanStringSlice(appCfg.Ntfy.Tags)
+	if len(ntfyTagOptions) == 0 {
+		ntfyTagOptions = append([]string(nil), defaultNtfyTagOptions...)
+	}
 	patternfolioURL = os.Getenv("PATTERNFOLIO_URL")
 	if patternfolioURL == "" {
 		patternfolioURL = "http://localhost:8082"
@@ -1948,6 +2259,7 @@ func main() {
 	http.HandleFunc("/api/open-chart", openChartHandler)
 	http.HandleFunc("/api/open-chart/", openChartHandler)
 	http.HandleFunc("/api/chart-data", chartDataHandler)
+	http.HandleFunc("/api/ntfy/publish", ntfyPublishHandler)
 	addr := fmt.Sprintf(":%d", listenPort)
 	go func() {
 		time.Sleep(500 * time.Millisecond)

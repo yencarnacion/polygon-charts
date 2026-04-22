@@ -531,6 +531,91 @@
       color: var(--warning);
       z-index: 2;
     }
+    .signal-action-row {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+      margin-top: 0.75rem;
+    }
+    .ntfy-feedback {
+      color: var(--muted);
+      font-size: 0.92rem;
+    }
+    .ntfy-feedback.is-error { color: #ff9f80; }
+    .ntfy-feedback.is-success { color: #7fe0b2; }
+    .ntfy-composer {
+      margin-top: 1rem;
+      padding: 1rem;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: rgba(11, 18, 32, 0.78);
+    }
+    .ntfy-composer-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+      margin-bottom: 0.85rem;
+    }
+    .ntfy-composer-title {
+      display: flex;
+      flex-direction: column;
+      gap: 0.2rem;
+    }
+    .ntfy-composer-title strong {
+      font-size: 1rem;
+      color: var(--text);
+    }
+    .ntfy-composer-meta {
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
+    .ntfy-url-link {
+      color: #88cbff;
+      font-size: 0.88rem;
+      word-break: break-all;
+    }
+    .ntfy-url-link:hover { color: #b7e2ff; }
+    .ntfy-tag-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 0.6rem;
+      margin-bottom: 0.9rem;
+    }
+    .ntfy-tag-option {
+      display: flex;
+      align-items: center;
+      gap: 0.55rem;
+      padding: 0.55rem 0.7rem;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+    }
+    .ntfy-tag-option input {
+      margin: 0;
+      accent-color: var(--accent);
+    }
+    .ntfy-tag-option span {
+      color: var(--text);
+      line-height: 1.2;
+    }
+    .ntfy-note {
+      min-height: 96px;
+      resize: vertical;
+      margin-bottom: 0.9rem;
+    }
+    .ntfy-actions {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+    }
+    .ntfy-hint {
+      color: var(--muted);
+      font-size: 0.84rem;
+    }
   </style>
 </head>
 <body>
@@ -554,7 +639,27 @@
       <div class="signal-info">
         <h3>{{TICKER}} - {{DATE}} at {{TIME_DISPLAY}}</h3>
         <p>Signal: <span class="signal-{{SIGNAL}}">{{SIGNAL_LABEL}}</span> | Resolution: {{RESOLUTION}} | Company: <span id="signal-company-name">Loading...</span></p>
-        <button class="btn btn-primary" onclick="postToPatternfolio()">Post to Patternfolio</button>
+        <div class="signal-action-row">
+          <button class="btn btn-primary" type="button" onclick="postToPatternfolio()">Post to Patternfolio</button>
+          <button id="toggleNtfyComposer" class="btn btn-outline-light {{NTFY_ENABLED_CLASS}}" type="button">Push to ntfy</button>
+          <span id="ntfyFeedback" class="ntfy-feedback {{NTFY_ENABLED_CLASS}}" aria-live="polite"></span>
+        </div>
+        <div id="ntfyComposer" class="ntfy-composer {{NTFY_ENABLED_CLASS}}" hidden>
+          <div class="ntfy-composer-head">
+            <div class="ntfy-composer-title">
+              <strong>Quick ntfy note</strong>
+              <span id="ntfyTarget" class="ntfy-composer-meta"></span>
+            </div>
+            <a id="ntfyPageUrl" class="ntfy-url-link" href="#" target="_blank" rel="noopener noreferrer"></a>
+          </div>
+          <div id="ntfyTagGrid" class="ntfy-tag-grid"></div>
+          <textarea id="ntfyNote" class="form-control ntfy-note" rows="3" placeholder="Add a quick trade note. Ctrl+Enter sends."></textarea>
+          <div class="ntfy-actions">
+            <button id="sendNtfyMessage" class="btn btn-primary btn-sm" type="button">Send to ntfy</button>
+            <button id="clearNtfyComposer" class="btn btn-secondary btn-sm" type="button">Clear</button>
+            <span class="ntfy-hint">Current page URL is included automatically.</span>
+          </div>
+        </div>
       </div>
       <section class="market-radar" data-marketaux-section>
         <div class="d-flex justify-content-between align-items-center gap-2 flex-wrap">
@@ -677,6 +782,10 @@
 <script>
 const patternfolioURL = "{{PATTERNFOLIO_URL}}";
 const marketauxEnabled = {{MARKETAUX_ENABLED}};
+const ntfyEnabled = {{NTFY_ENABLED}};
+const ntfyServer = {{NTFY_SERVER_JSON}};
+const ntfyTopic = {{NTFY_TOPIC_JSON}};
+const ntfyTagOptions = {{NTFY_TAG_OPTIONS_JSON}};
 // Signal Chart Logic
 let signalListenersAdded = false;
 let signalChart, signalCandleSeries, signalVolumeSeries, signalVwapSeries, signalSmaSeries;
@@ -697,6 +806,7 @@ let contextLoaded = false;
 let contextDailyChart, contextDailyCandleSeries, contextDailyVolumeSeries;
 let contextIntradayChart, contextIntradayCandleSeries, contextIntradayVolumeSeries, contextIntradayVwapSeries;
 let contextNews = [], contextFilings = [];
+let ntfyIsSending = false;
 const radarTables = {};
 
 function removeMarketauxSections() {
@@ -704,6 +814,143 @@ function removeMarketauxSections() {
 }
 if (!marketauxEnabled) {
   removeMarketauxSections();
+}
+
+function getCurrentChartUrl() {
+  return window.location.href;
+}
+
+function syncNtfyComposerMeta() {
+  const url = getCurrentChartUrl();
+  const pageLink = document.getElementById('ntfyPageUrl');
+  const target = document.getElementById('ntfyTarget');
+  if (pageLink) {
+    pageLink.href = url;
+    pageLink.textContent = url;
+  }
+  if (target) {
+    target.textContent = `Topic: ${ntfyServer}/${ntfyTopic}`;
+  }
+}
+
+function setNtfyFeedback(message, kind = "") {
+  const el = document.getElementById('ntfyFeedback');
+  if (!el) return;
+  el.textContent = message || "";
+  el.classList.remove('is-error', 'is-success');
+  if (kind === "error") {
+    el.classList.add('is-error');
+  } else if (kind === "success") {
+    el.classList.add('is-success');
+  }
+}
+
+function getSelectedNtfyTags() {
+  return Array.from(document.querySelectorAll('#ntfyTagGrid input[type="checkbox"]:checked'))
+    .map(input => input.value);
+}
+
+function renderNtfyTagOptions() {
+  const grid = document.getElementById('ntfyTagGrid');
+  if (!grid) return;
+  grid.innerHTML = ntfyTagOptions.map((tag, index) => `
+    <label class="ntfy-tag-option" for="ntfy-tag-${index}">
+      <input id="ntfy-tag-${index}" type="checkbox" value="${tag}">
+      <span>${tag}</span>
+    </label>
+  `).join('');
+}
+
+function clearNtfyComposer() {
+  const note = document.getElementById('ntfyNote');
+  if (note) {
+    note.value = '';
+  }
+  document.querySelectorAll('#ntfyTagGrid input[type="checkbox"]').forEach(input => {
+    input.checked = false;
+  });
+  setNtfyFeedback('');
+}
+
+function setNtfySendingState(isSending) {
+  ntfyIsSending = isSending;
+  const sendButton = document.getElementById('sendNtfyMessage');
+  const toggleButton = document.getElementById('toggleNtfyComposer');
+  if (sendButton) {
+    sendButton.disabled = isSending;
+    sendButton.textContent = isSending ? 'Sending...' : 'Send to ntfy';
+  }
+  if (toggleButton) {
+    toggleButton.disabled = isSending;
+  }
+}
+
+function showNtfyComposer() {
+  if (!ntfyEnabled) return;
+  const composer = document.getElementById('ntfyComposer');
+  if (!composer) return;
+  syncNtfyComposerMeta();
+  composer.hidden = false;
+  document.getElementById('ntfyNote')?.focus();
+}
+
+function toggleNtfyComposer() {
+  if (!ntfyEnabled) return;
+  const composer = document.getElementById('ntfyComposer');
+  if (!composer) return;
+  const willOpen = composer.hidden;
+  composer.hidden = !willOpen;
+  if (willOpen) {
+    syncNtfyComposerMeta();
+    document.getElementById('ntfyNote')?.focus();
+  }
+}
+
+async function sendNtfyMessage() {
+  if (!ntfyEnabled || ntfyIsSending) return;
+  const note = document.getElementById('ntfyNote')?.value || '';
+  const tags = getSelectedNtfyTags();
+  setNtfySendingState(true);
+  setNtfyFeedback('Sending to ntfy...');
+  try {
+    const { data } = await axios.post('/api/ntfy/publish', {
+      pageUrl: getCurrentChartUrl(),
+      note,
+      tags
+    }, { timeout: 10000 });
+    document.getElementById('ntfyNote').value = '';
+    const confirmation = data.messageId
+      ? `Sent to ${data.topic} (${data.messageId}).`
+      : `Sent to ${data.topic}.`;
+    setNtfyFeedback(confirmation, 'success');
+  } catch (err) {
+    const message = err.response?.data || err.message || 'Unable to send to ntfy.';
+    setNtfyFeedback(message, 'error');
+  } finally {
+    setNtfySendingState(false);
+  }
+}
+
+function initNtfyComposer() {
+  if (!ntfyEnabled) {
+    return;
+  }
+  renderNtfyTagOptions();
+  syncNtfyComposerMeta();
+  document.getElementById('toggleNtfyComposer')?.addEventListener('click', toggleNtfyComposer);
+  document.getElementById('sendNtfyMessage')?.addEventListener('click', sendNtfyMessage);
+  document.getElementById('clearNtfyComposer')?.addEventListener('click', clearNtfyComposer);
+  document.getElementById('ntfyNote')?.addEventListener('keydown', event => {
+    if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+      event.preventDefault();
+      sendNtfyMessage();
+    } else if (event.key === 'Escape') {
+      const composer = document.getElementById('ntfyComposer');
+      if (composer && !composer.hidden) {
+        composer.hidden = true;
+      }
+    }
+  });
 }
 
 const nyTime = ts =>
@@ -2849,6 +3096,7 @@ document.getElementById('context-tab').addEventListener('shown.bs.tab', () => {
 });
 
 // Initialize Signal Chart
+initNtfyComposer();
 loadSignalChart();
 
 async function postToPatternfolio() {
