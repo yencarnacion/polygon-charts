@@ -1994,6 +1994,7 @@ func chartDataHandler(w http.ResponseWriter, r *http.Request) {
 			sma = append(sma, linePoint{Time: c.Time, Value: sum / 9})
 		}
 	}
+	priorTradingDate, _ := getPriorTradingDate(symbol, dateStr)
 	priorClose, priorVolume := getPriorDayData(symbol, dateStr)
 	metrics := calculateMetrics(extendedCandles, extendedVolume, priorClose, priorVolume)
 	includeExtras := strings.ToLower(strings.TrimSpace(q.Get("includeExtras"))) != "false"
@@ -2112,16 +2113,17 @@ func chartDataHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	out := map[string]interface{}{
-		"candles":    candles,
-		"volume":     vol,
-		"minCandles": extendedCandles,
-		"minVolume":  extendedVolume,
-		"vwap":       vwap,
-		"sma":        sma,
-		"metrics":    metrics,
-		"news":       uniqueNews,
-		"filings":    allFilings,
-		"profile":    profileData,
+		"candles":            candles,
+		"volume":             vol,
+		"minCandles":         extendedCandles,
+		"minVolume":          extendedVolume,
+		"vwap":               vwap,
+		"sma":                sma,
+		"metrics":            metrics,
+		"prior_trading_date": priorTradingDate,
+		"news":               uniqueNews,
+		"filings":            allFilings,
+		"profile":            profileData,
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(out)
@@ -2187,7 +2189,7 @@ func calculateMetrics(candles []candlePoint, volumes []linePoint, priorClose, pr
 	if open > 0 {
 		percentGain := (close - open) / open * 100
 		maxSpikingUp := (high - open) / open * 100
-		maxSpikingDown := (low - open) / open * 100
+		maxSpikingDown := (open - low) / open * 100
 		metrics["percent_gain_eod"] = fmt.Sprintf("%.2f", percentGain)
 		metrics["max_spiking_up_percent"] = fmt.Sprintf("%.2f", maxSpikingUp)
 		metrics["max_spiking_down_percent"] = fmt.Sprintf("%.2f", maxSpikingDown)

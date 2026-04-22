@@ -1067,6 +1067,18 @@ const NEW_COLUMNS = [
   'percent_gain_eod', 'max_spiking_up_percent', 'max_spiking_down_percent',
   'volume', 'percent_gap_from_prior', 'prior_day_volume', 'pre_market_volume'
 ];
+
+function metricColumnTitle(field) {
+  switch (field) {
+    case 'percent_gain_eod':
+      return 'PERCENT GAIN AS OF TIME';
+    case 'pre_market_volume':
+      return 'OVERNIGHT VOLUME';
+    default:
+      return field.toUpperCase().replace(/_/g, ' ');
+  }
+}
+
 function truncatedTooltip(cell) {
   const el = cell.getElement();
   const textEl = el.querySelector('a') || el;
@@ -1324,13 +1336,13 @@ function signalMetricColumns() {
     { title: "CLOSE PRICE", field: "close_price", minWidth: 80, headerSort: false, headerTooltip: true },
     { title: "HIGH OF DAY", field: "high_of_day", minWidth: 80, headerSort: false, headerTooltip: true },
     { title: "LOW OF DAY", field: "low_of_day", minWidth: 80, headerSort: false, headerTooltip: true },
-    { title: "PERCENT GAIN EOD", field: "percent_gain_eod", minWidth: 80, headerSort: false, headerTooltip: true },
+    { title: "PERCENT GAIN AS OF TIME", field: "percent_gain_eod", minWidth: 80, headerSort: false, headerTooltip: true },
     { title: "MAX SPIKING UP PERCENT", field: "max_spiking_up_percent", minWidth: 80, headerSort: false, headerTooltip: true },
     { title: "MAX SPIKING DOWN PERCENT", field: "max_spiking_down_percent", minWidth: 80, headerSort: false, headerTooltip: true },
     { title: "VOLUME", field: "volume", minWidth: 80, headerSort: false, headerTooltip: true },
     { title: "PERCENT GAP FROM PRIOR", field: "percent_gap_from_prior", minWidth: 80, headerSort: false, headerTooltip: true },
     { title: "PRIOR DAY VOLUME", field: "prior_day_volume", minWidth: 80, headerSort: false, headerTooltip: true },
-    { title: "PRE MARKET VOLUME", field: "pre_market_volume", minWidth: 80, headerSort: false, headerTooltip: true },
+    { title: "OVERNIGHT VOLUME", field: "pre_market_volume", minWidth: 80, headerSort: false, headerTooltip: true },
   ];
 }
 
@@ -1604,10 +1616,7 @@ async function loadSignalMetrics() {
     const row = buildSignalMetricsRow(metrics);
     renderSignalMetricsRow(row);
 
-    let d = new Date(date);
-    d.setDate(d.getDate() - 1);
-    while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() - 1);
-    const priorDate = d.toISOString().split('T')[0];
+    const priorDate = data.prior_trading_date || '';
     fetchMarketCap(ticker).then(value => {
       row.market_cap = value;
       renderSignalMetricsRow(row);
@@ -2753,7 +2762,7 @@ async function loadBaseChart(e, skipDefaultRow = false) {
       baseCsvData = [{ __row: 0, ...row }];
       const allFields = ['ticker', 'time', 'signal', ...NEW_COLUMNS];
       const cols = allFields.map(h => ({
-        title: h.toUpperCase().replace(/_/g, ' '),
+        title: metricColumnTitle(h),
         field: h,
         editor: "input",
         minWidth: 80,
@@ -2973,7 +2982,7 @@ document.getElementById('base-csvFile').addEventListener('change', async e => {
   });
   const allFields = [...new Set([...p.meta.fields, ...NEW_COLUMNS])];
   const cols = allFields.map(h => ({
-    title: h.toUpperCase().replace(/_/g, ' '),
+    title: metricColumnTitle(h),
     field: h,
     editor: "input",
     minWidth: 80,

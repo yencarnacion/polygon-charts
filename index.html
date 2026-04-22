@@ -1979,7 +1979,7 @@ async function load(e, skipDefaultRow = false){
       csvData = [{__row: 0, ...row}];
       const allFields = ['ticker', 'time', 'signal', ...NEW_COLUMNS];
       const cols = allFields.map(h => ({
-        title: h.toUpperCase().replace(/_/g, ' '),
+        title: metricColumnTitle(h),
         field: h,
         editor: "input",
         minWidth: 80,
@@ -2058,6 +2058,17 @@ const NEW_COLUMNS=[
   'market_cap','float','open_price','close_price','high_of_day','low_of_day',
   'percent_gain_eod','max_spiking_up_percent','max_spiking_down_percent',
   'volume','percent_gap_from_prior', 'prior_day_volume', 'pre_market_volume'];
+
+function metricColumnTitle(field) {
+  switch (field) {
+    case 'percent_gain_eod':
+      return 'PERCENT GAIN AS OF TIME';
+    case 'pre_market_volume':
+      return 'OVERNIGHT VOLUME';
+    default:
+      return field.toUpperCase().replace(/_/g, ' ');
+  }
+}
 
 /* Update table view to show only current row */
 function updateTableView(){
@@ -2211,7 +2222,7 @@ async function fetchExtendedData(ticker, date){
   }
 }
 
-/* ─── Calculate pre-market volume ────────────────────────── */
+/* ─── Calculate overnight volume (prior after-hours + current pre-market) ── */
 async function calculatePreMarketVolume(ticker, currentDate, priorDate){
   const priorExtVol = await fetchExtendedData(ticker, priorDate);
   const priorAfterHours = priorExtVol
@@ -2297,7 +2308,7 @@ async function calculateMetricsForRow(row){
     if(priorDayVolumes[ticker]){
       row.prior_day_volume = Math.round(priorDayVolumes[ticker]).toLocaleString();
     }
-    // New: Pre-market volume (prior after + current pre)
+    // Overnight volume = prior after-hours + current pre-market.
     const priorDate = priorDayDates[ticker] || '';
     let preVol = 0;
     if(priorDate){
@@ -2327,7 +2338,7 @@ document.getElementById('csvFile').addEventListener('change',async e=>{
   });
   const allFields=[...new Set([...p.meta.fields,...NEW_COLUMNS])];
   const cols=allFields.map(h=>({
-    title:h.toUpperCase().replace(/_/g,' '),
+    title:metricColumnTitle(h),
     field:h,
     editor:"input",
     minWidth:80,
