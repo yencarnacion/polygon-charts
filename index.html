@@ -25,6 +25,7 @@
       --negative: #ff8a5a;
       --warning: #ffd166;
       --neutral: #8ca0bc;
+      --ib-guide: #56b4e9;
     }
     body {
       margin: 1rem;
@@ -291,6 +292,22 @@
       grid-template-columns: repeat(var(--periods), minmax(10px, 1fr));
       gap: 2px;
       min-width: 0;
+    }
+    .tpo-print-grid.tpo-print-grid-ib {
+      position: relative;
+      padding-left: 8px;
+    }
+    .tpo-print-grid.tpo-print-grid-ib::before {
+      content: "";
+      position: absolute;
+      left: 2px;
+      top: -1px;
+      bottom: -1px;
+      width: 3px;
+      border-radius: 999px;
+      background: var(--ib-guide);
+      box-shadow: 0 0 0 1px rgba(86, 180, 233, 0.16), 0 0 10px rgba(86, 180, 233, 0.2);
+      pointer-events: none;
     }
     .tpo-period-label {
       text-align: center;
@@ -1145,6 +1162,7 @@ function tpoRenderCard(title, dateStr, built, axisRows = []) {
     const isOpenPrice = Number.isFinite(Number(p.openPrice)) && row.idx === p.openPriceIdx;
     const isLastPrice = lastContext && row.idx === p.lastCloseIdx;
     const activePeriods = new Set(row.periods || []);
+    const hasInitialBalancePrint = activePeriods.has(0) || activePeriods.has(1);
     const tags = [
       isPoc ? '<span class="tpo-tag tpo-tag-poc">POC</span>' : "",
       row.idx === p.valueHighIdx ? '<span class="tpo-tag tpo-tag-va">VAH</span>' : "",
@@ -1162,7 +1180,7 @@ function tpoRenderCard(title, dateStr, built, axisRows = []) {
     return `
       <div class="tpo-row ${isVA ? "tpo-value-area" : ""} ${isPoc ? "tpo-poc" : ""} ${(isOpenPrice || isLastPrice) ? "tpo-last-price" : ""}">
         <div class="tpo-price">${tpoFormatPrice(row.price)}${tags}</div>
-        <div class="tpo-print-grid" style="--periods:${TPO_PERIOD_LABELS.length}" aria-label="TPO prints by 30-minute period">${cells}</div>
+        <div class="tpo-print-grid ${hasInitialBalancePrint ? "tpo-print-grid-ib" : ""}" style="--periods:${TPO_PERIOD_LABELS.length}" aria-label="TPO prints by 30-minute period">${cells}</div>
         <div class="tpo-count">${row.count}</div>
       </div>
     `;
