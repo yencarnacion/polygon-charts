@@ -142,6 +142,13 @@
       max-width: 720px;
       margin: 0.2rem 0 0;
     }
+    .tpo-head-actions {
+      display: flex;
+      align-items: flex-start;
+      justify-content: flex-end;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+    }
     .tpo-chart-grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
@@ -243,6 +250,12 @@
       text-transform: uppercase;
       letter-spacing: 0.03em;
     }
+    .tpo-curve-header {
+      color: var(--muted);
+      font-size: 0.62rem;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
     .tpo-period-labels,
     .tpo-print-grid {
       display: grid;
@@ -250,11 +263,13 @@
       gap: 2px;
       min-width: 0;
     }
-    .tpo-print-grid.tpo-print-grid-ib {
+    .tpo-print-grid.tpo-print-grid-ib,
+    .tpo-curve-track.tpo-curve-track-ib {
       position: relative;
       padding-left: 8px;
     }
-    .tpo-print-grid.tpo-print-grid-ib::before {
+    .tpo-print-grid.tpo-print-grid-ib::before,
+    .tpo-curve-track.tpo-curve-track-ib::before {
       content: "";
       position: absolute;
       left: 2px;
@@ -320,6 +335,57 @@
       background: var(--warning);
       border-color: rgba(255, 232, 161, 0.85);
       color: #081421;
+    }
+    .tpo-curve-track {
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      min-height: 14px;
+    }
+    .tpo-curve-stack {
+      display: inline-flex;
+      align-items: center;
+      gap: 2px;
+      min-width: 0;
+      max-width: 100%;
+      overflow: hidden;
+    }
+    .tpo-curve-print {
+      min-width: 11px;
+      height: 14px;
+      border: 1px solid rgba(103, 129, 159, 0.34);
+      border-radius: 2px;
+      background: #67819f;
+      color: #f2f7ff;
+      font-size: 0.54rem;
+      line-height: 12px;
+      text-align: center;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      flex: 0 0 auto;
+    }
+    .tpo-curve-print.ib {
+      outline: 2px solid rgba(233, 241, 251, 0.82);
+      outline-offset: -2px;
+      box-shadow: 0 0 0 1px rgba(167, 243, 208, 0.58);
+      background: rgba(33, 197, 143, 0.78);
+      border-color: rgba(167, 243, 208, 0.6);
+      color: #061322;
+    }
+    .tpo-row.tpo-value-area .tpo-curve-print {
+      background: #4fa7ff;
+      border-color: rgba(142, 208, 255, 0.45);
+      color: #061322;
+    }
+    .tpo-row.tpo-poc .tpo-curve-print {
+      background: var(--warning);
+      border-color: rgba(255, 232, 161, 0.85);
+      color: #081421;
+    }
+    .tpo-row.tpo-value-area .tpo-curve-print.ib,
+    .tpo-row.tpo-poc .tpo-curve-print.ib {
+      outline: 2px solid rgba(233, 241, 251, 0.82);
+      outline-offset: -2px;
     }
     .tpo-count {
       color: var(--muted);
@@ -2110,6 +2176,7 @@ const TPO_PERIOD_MINUTES = 30;
 const TPO_PERIOD_LABELS = "ABCDEFGHIJKLM".split("");
 const tpoChartPriorDateCache = {};
 const tpoChartMinuteCache = {};
+const tpoChartViewModes = {};
 
 function tpoEscape(value) {
   return String(value ?? "").replace(/[&<>"']/g, ch => ({
@@ -2425,7 +2492,23 @@ function tpoRenderEvolution(evolution) {
   `;
 }
 
-function tpoRenderCard(title, dateStr, built, axisRows = []) {
+function tpoGetViewMode(containerId) {
+  return tpoChartViewModes[containerId] === "curve" ? "curve" : "columns";
+}
+
+function tpoRenderCompressedCells(periods = []) {
+  if (!periods.length) return '<div class="tpo-curve-stack"></div>';
+  const prints = periods.map(i => {
+    const label = TPO_PERIOD_LABELS[i] || "?";
+    const start = TPO_RTH_START + i * TPO_PERIOD_MINUTES;
+    const end = start + TPO_PERIOD_MINUTES;
+    const title = `${label}: ${tpoMinuteLabel(start)}-${tpoMinuteLabel(end)} ET${i < 2 ? " (Initial Balance)" : ""}`;
+    return `<span class="tpo-curve-print ${i < 2 ? "ib" : ""}" title="${tpoEscape(title)}">${label}</span>`;
+  }).join("");
+  return `<div class="tpo-curve-stack">${prints}</div>`;
+}
+
+function tpoRenderCard(title, dateStr, built, axisRows = [], viewMode = "columns") {
   if (!built || !built.profile) {
     return `
       <article class="tpo-card">
@@ -2442,11 +2525,12 @@ function tpoRenderCard(title, dateStr, built, axisRows = []) {
   const rowsByIdx = new Map(p.rows.map(row => [row.idx, row]));
   const status = p.isComplete ? "Complete RTH" : `RTH through ${tpoMinuteLabel(p.lastMinute)} ET`;
   const lastContext = tpoLastPriceContext(p);
-  const periodLabels = TPO_PERIOD_LABELS.map((label, i) => `<span class="tpo-period-label ${i < 2 ? "ib" : ""}">${label}</span>`).join("");
   const headerHtml = `
     <div class="tpo-grid-header">
       <span>Price</span>
-      <div class="tpo-period-labels" style="--periods:${TPO_PERIOD_LABELS.length}">${periodLabels}</div>
+      ${viewMode === "curve"
+        ? '<div class="tpo-curve-header">Compressed Profile</div>'
+        : `<div class="tpo-period-labels" style="--periods:${TPO_PERIOD_LABELS.length}">${TPO_PERIOD_LABELS.map((label, i) => `<span class="tpo-period-label ${i < 2 ? "ib" : ""}">${label}</span>`).join("")}</div>`}
       <span>TPOs</span>
     </div>
   `;
@@ -2465,17 +2549,19 @@ function tpoRenderCard(title, dateStr, built, axisRows = []) {
       isOpenPrice ? `<span class="tpo-tag tpo-tag-last">OPEN ${tpoFormatPrice(p.openPrice)}</span>` : "",
       isLastPrice ? `<span class="tpo-tag tpo-tag-last">${p.isComplete ? "CLOSE" : "LAST"} ${tpoFormatPrice(p.lastClose)}</span>` : ""
     ].join("");
-    const cells = TPO_PERIOD_LABELS.map((label, i) => {
-      const active = activePeriods.has(i);
-      const start = TPO_RTH_START + i * TPO_PERIOD_MINUTES;
-      const end = start + TPO_PERIOD_MINUTES;
-      const title = `${label}: ${tpoMinuteLabel(start)}-${tpoMinuteLabel(end)} ET${i < 2 ? " (Initial Balance)" : ""}`;
-      return `<span class="tpo-print-cell ${active ? "active" : ""} ${i < 2 ? "ib" : ""}" title="${tpoEscape(title)}">${active ? label : ""}</span>`;
-    }).join("");
+    const middleHtml = viewMode === "curve"
+      ? `<div class="tpo-curve-track ${hasInitialBalancePrint ? "tpo-curve-track-ib" : ""}" aria-label="Compressed TPO profile">${tpoRenderCompressedCells(row.periods || [])}</div>`
+      : `<div class="tpo-print-grid ${hasInitialBalancePrint ? "tpo-print-grid-ib" : ""}" style="--periods:${TPO_PERIOD_LABELS.length}" aria-label="TPO prints by 30-minute period">${TPO_PERIOD_LABELS.map((label, i) => {
+          const active = activePeriods.has(i);
+          const start = TPO_RTH_START + i * TPO_PERIOD_MINUTES;
+          const end = start + TPO_PERIOD_MINUTES;
+          const title = `${label}: ${tpoMinuteLabel(start)}-${tpoMinuteLabel(end)} ET${i < 2 ? " (Initial Balance)" : ""}`;
+          return `<span class="tpo-print-cell ${active ? "active" : ""} ${i < 2 ? "ib" : ""}" title="${tpoEscape(title)}">${active ? label : ""}</span>`;
+        }).join("")}</div>`;
     return `
       <div class="tpo-row ${isVA ? "tpo-value-area" : ""} ${isPoc ? "tpo-poc" : ""} ${(isOpenPrice || isLastPrice) ? "tpo-last-price" : ""}">
         <div class="tpo-price">${tpoFormatPrice(row.price)}${tags}</div>
-        <div class="tpo-print-grid ${hasInitialBalancePrint ? "tpo-print-grid-ib" : ""}" style="--periods:${TPO_PERIOD_LABELS.length}" aria-label="TPO prints by 30-minute period">${cells}</div>
+        ${middleHtml}
         <div class="tpo-count">${row.count}</div>
       </div>
     `;
@@ -2514,6 +2600,31 @@ function tpoRenderCard(title, dateStr, built, axisRows = []) {
   `;
 }
 
+function tpoRenderChartMarkup(containerId, dateStr, priorDate, priorBuilt, currentBuilt, axisRows) {
+  const viewMode = tpoGetViewMode(containerId);
+  const toggleLabel = viewMode === "curve" ? "Column View" : "Curve View";
+  const nextView = viewMode === "curve" ? "columns" : "curve";
+  return `
+    <div class="tpo-chart-head">
+      <div>
+        <h4>TPO Chart (RTH Only)</h4>
+        <p class="tpo-chart-note">Previous day is on the left. Both charts share the same price ladder, so today can be read directly against prior value. A and B are outlined as Initial Balance, the first hour when the session's early auction range is set. Use ${viewMode === "curve" ? "Column View" : "Curve View"} to switch profile shape.</p>
+      </div>
+      <div class="tpo-head-actions">
+        <button type="button" class="btn btn-outline-light btn-sm tpo-view-toggle" data-next-view="${nextView}">${toggleLabel}</button>
+        <div class="tpo-legend">
+          <span><span class="tpo-dot poc"></span>POC</span>
+          <span><span class="tpo-dot va"></span>Value Area</span>
+        </div>
+      </div>
+    </div>
+    <div class="tpo-chart-grid">
+      ${tpoRenderCard("Previous Day", priorDate || "Unavailable", priorBuilt, axisRows, viewMode)}
+      ${tpoRenderCard("Current Day", dateStr, currentBuilt, axisRows, viewMode)}
+    </div>
+  `;
+}
+
 async function renderTpoCharts(containerId, ticker, dateStr, currentCandles = null, isStale = () => false) {
   const el = document.getElementById(containerId);
   if (!el || !ticker || !dateStr) return;
@@ -2547,23 +2658,18 @@ async function renderTpoCharts(containerId, ticker, dateStr, currentCandles = nu
     priorBuilt = priorCandidate && priorCandidate.profile ? priorCandidate : null;
     const currentBuilt = tpoBuildProfile(current, sharedTick);
     const axisRows = tpoBuildAxisRows(priorBuilt?.profile, currentBuilt?.profile);
+    const renderResolvedCharts = () => {
+      el.innerHTML = tpoRenderChartMarkup(containerId, dateStr, priorDate, priorBuilt, currentBuilt, axisRows);
+      const toggle = el.querySelector(".tpo-view-toggle");
+      if (toggle) {
+        toggle.addEventListener("click", () => {
+          tpoChartViewModes[containerId] = toggle.dataset.nextView === "curve" ? "curve" : "columns";
+          renderResolvedCharts();
+        });
+      }
+    };
     if (isStale()) return;
-    el.innerHTML = `
-      <div class="tpo-chart-head">
-        <div>
-          <h4>TPO Chart (RTH Only)</h4>
-          <p class="tpo-chart-note">Previous day is on the left. Both charts share the same price ladder, so today can be read directly against prior value. A and B are outlined as Initial Balance, the first hour when the session's early auction range is set.</p>
-        </div>
-        <div class="tpo-legend">
-          <span><span class="tpo-dot poc"></span>POC</span>
-          <span><span class="tpo-dot va"></span>Value Area</span>
-        </div>
-      </div>
-      <div class="tpo-chart-grid">
-        ${tpoRenderCard("Previous Day", priorDate || "Unavailable", priorBuilt, axisRows)}
-        ${tpoRenderCard("Current Day", dateStr, currentBuilt, axisRows)}
-      </div>
-    `;
+    renderResolvedCharts();
   } catch (err) {
     if (isStale()) return;
     console.error("[tpoChart] error", err);
