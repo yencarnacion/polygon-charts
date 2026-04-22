@@ -2131,6 +2131,7 @@ function tpoPeriodIndex(epochSec) {
 function tpoRthCandles(candles) {
   return (Array.isArray(candles) ? candles : [])
     .filter(c => c && Number.isFinite(Number(c.time)) &&
+      Number.isFinite(Number(c.open)) &&
       Number.isFinite(Number(c.high)) && Number.isFinite(Number(c.low)) &&
       Number.isFinite(Number(c.close)))
     .filter(c => {
@@ -2139,6 +2140,7 @@ function tpoRthCandles(candles) {
     })
     .map(c => ({
       time: Number(c.time),
+      open: Number(c.open),
       high: Number(c.high),
       low: Number(c.low),
       close: Number(c.close)
@@ -2248,7 +2250,9 @@ function tpoComputeFromRth(rthCandles, forcedTick = null) {
   }
 
   const lastMinute = Math.max(...rthCandles.map(c => tpoEtMinute(c.time)));
+  const openCandle = rthCandles[0];
   const lastCandle = rthCandles[rthCandles.length - 1];
+  const openPrice = openCandle ? openCandle.open : NaN;
   const lastClose = lastCandle ? lastCandle.close : NaN;
   return {
     rows,
@@ -2267,6 +2271,8 @@ function tpoComputeFromRth(rthCandles, forcedTick = null) {
     valueTpos,
     abovePoc,
     belowPoc,
+    openPrice,
+    openPriceIdx: Number.isFinite(openPrice) ? Math.floor(openPrice / tick) : null,
     lastClose,
     lastCloseIdx: Number.isFinite(lastClose) ? Math.floor(lastClose / tick) : null,
     lastMinute,
@@ -2431,12 +2437,14 @@ function tpoRenderCard(title, dateStr, built, axisRows = []) {
     const row = rowsByIdx.get(axisRow.idx) || { idx: axisRow.idx, price: axisRow.price, count: 0, periods: [] };
     const isPoc = row.idx === p.pocIdx;
     const isVA = row.idx >= p.valueLowIdx && row.idx <= p.valueHighIdx;
+    const isOpenPrice = Number.isFinite(Number(p.openPrice)) && row.idx === p.openPriceIdx;
     const isLastPrice = lastContext && row.idx === p.lastCloseIdx;
     const activePeriods = new Set(row.periods || []);
     const tags = [
       isPoc ? '<span class="tpo-tag tpo-tag-poc">POC</span>' : "",
       row.idx === p.valueHighIdx ? '<span class="tpo-tag tpo-tag-va">VAH</span>' : "",
       row.idx === p.valueLowIdx ? '<span class="tpo-tag tpo-tag-va">VAL</span>' : "",
+      isOpenPrice ? `<span class="tpo-tag tpo-tag-last">OPEN ${tpoFormatPrice(p.openPrice)}</span>` : "",
       isLastPrice ? `<span class="tpo-tag tpo-tag-last">${p.isComplete ? "CLOSE" : "LAST"} ${tpoFormatPrice(p.lastClose)}</span>` : ""
     ].join("");
     const cells = TPO_PERIOD_LABELS.map((label, i) => {
@@ -2447,7 +2455,7 @@ function tpoRenderCard(title, dateStr, built, axisRows = []) {
       return `<span class="tpo-print-cell ${active ? "active" : ""} ${i < 2 ? "ib" : ""}" title="${tpoEscape(title)}">${active ? label : ""}</span>`;
     }).join("");
     return `
-      <div class="tpo-row ${isVA ? "tpo-value-area" : ""} ${isPoc ? "tpo-poc" : ""} ${isLastPrice ? "tpo-last-price" : ""}">
+      <div class="tpo-row ${isVA ? "tpo-value-area" : ""} ${isPoc ? "tpo-poc" : ""} ${(isOpenPrice || isLastPrice) ? "tpo-last-price" : ""}">
         <div class="tpo-price">${tpoFormatPrice(row.price)}${tags}</div>
         <div class="tpo-print-grid" style="--periods:${TPO_PERIOD_LABELS.length}" aria-label="TPO prints by 30-minute period">${cells}</div>
         <div class="tpo-count">${row.count}</div>
