@@ -114,6 +114,8 @@ type FMPFloat struct {
 	FloatShares float64 `json:"floatShares"`
 }
 
+const cciPeriod = 27
+
 type NewsItem struct {
 	Title     string `json:"title"`
 	Source    string `json:"source"`
@@ -276,6 +278,59 @@ func calculateCCI(candles []candlePoint, period int) []linePoint {
 		})
 	}
 	return out
+}
+
+func filterLinePointsFromHour(points []linePoint, loc *time.Location, startHour int) []linePoint {
+	out := make([]linePoint, 0, len(points))
+	for _, p := range points {
+		if time.Unix(p.Time, 0).In(loc).Hour() >= startHour {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+func aggregateCandlePoints(candles []candlePoint, volume []linePoint, mult int) ([]candlePoint, []linePoint) {
+	aggCandles := make([]candlePoint, 0)
+	aggVolume := make([]linePoint, 0)
+	if mult <= 1 {
+		return append(aggCandles, candles...), append(aggVolume, volume...)
+	}
+	for i := 0; i < len(candles); i += mult {
+		end := i + mult
+		if end > len(candles) {
+			end = len(candles)
+		}
+		group := candles[i:end]
+		if len(group) == 0 {
+			break
+		}
+		o := group[0].Open
+		h := group[0].High
+		l := group[0].Low
+		c := group[len(group)-1].Close
+		v := 0.0
+		for j := i; j < end && j < len(volume); j++ {
+			v += volume[j].Value
+		}
+		for _, g := range group {
+			if g.High > h {
+				h = g.High
+			}
+			if g.Low < l {
+				l = g.Low
+			}
+		}
+		aggCandles = append(aggCandles, candlePoint{
+			Time:  group[0].Time,
+			Open:  o,
+			High:  h,
+			Low:   l,
+			Close: c,
+		})
+		aggVolume = append(aggVolume, linePoint{Time: group[0].Time, Value: v})
+	}
+	return aggCandles, aggVolume
 }
 
 func normalizeTrendScore(raw float64) float64 {
@@ -1283,11 +1338,24 @@ func candlesHandler(w http.ResponseWriter, r *http.Request) {
 	loc, _ := time.LoadLocation("America/New_York")
 	candles := make([]candlePoint, 0, len(bars))
 	vol := make([]linePoint, 0, len(bars))
+	cciCandles := make([]candlePoint, 0, len(bars))
+	usesHiddenCciWarmup := !extended && span != "day"
 	for _, b := range bars {
 		ts := time.UnixMilli(b.T).In(loc)
 		h := ts.Hour()
-		if !extended && span == "minute" && (h < 7 || h >= 16) {
-			continue
+		if usesHiddenCciWarmup {
+			if h >= 4 && h < 16 {
+				cciCandles = append(cciCandles, candlePoint{
+					Time:  b.T / 1000,
+					Open:  b.O,
+					High:  b.H,
+					Low:   b.L,
+					Close: b.C,
+				})
+			}
+			if h < 7 || h >= 16 {
+				continue
+			}
 		}
 		candles = append(candles, candlePoint{
 			Time:  b.T / 1000,
@@ -1297,6 +1365,9 @@ func candlesHandler(w http.ResponseWriter, r *http.Request) {
 			Close: b.C,
 		})
 		vol = append(vol, linePoint{Time: b.T / 1000, Value: b.V})
+	}
+	if !usesHiddenCciWarmup {
+		cciCandles = candles
 	}
 	var minBars []polygonBar
 	var minErr error
@@ -1351,7 +1422,10 @@ func candlesHandler(w http.ResponseWriter, r *http.Request) {
 			sma = append(sma, linePoint{Time: c.Time, Value: sum / 9})
 		}
 	}
-	cci := calculateCCI(candles, 27)
+	cci := calculateCCI(cciCandles, cciPeriod)
+	if usesHiddenCciWarmup {
+		cci = filterLinePointsFromHour(cci, loc, 7)
+	}
 	out := payload{Candles: candles, Volume: vol, MinCandles: minCandles, MinVolume: minVolume, VWAP: vwap, SMA9: sma, CCI: cci}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(out)
@@ -1906,9 +1980,28 @@ func chartDataHandler(w http.ResponseWriter, r *http.Request) {
 	var lastTime int64
 	extendedCandles := make([]candlePoint, 0)
 	extendedVolume := make([]linePoint, 0)
+	cciWarmupCandles := make([]candlePoint, 0)
+	cciWarmupVolume := make([]linePoint, 0)
 	for _, b := range minBars {
 		ts := time.UnixMilli(b.T).In(loc)
 		h, m := ts.Hour(), ts.Minute()
+		if h >= 4 && h < 7 {
+			if h > targetHour || (h == targetHour && m > targetMinute) {
+				break
+			}
+			cciWarmupCandles = append(cciWarmupCandles, candlePoint{
+				Time:  b.T / 1000,
+				Open:  b.O,
+				High:  b.H,
+				Low:   b.L,
+				Close: b.C,
+			})
+			cciWarmupVolume = append(cciWarmupVolume, linePoint{
+				Time:  b.T / 1000,
+				Value: b.V,
+			})
+			continue
+		}
 		if h < 7 || h >= 16 {
 			continue
 		}
@@ -1953,6 +2046,8 @@ func chartDataHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	var candles []candlePoint
 	var vol []linePoint
+	cciInputCandles := append(append([]candlePoint{}, cciWarmupCandles...), extendedCandles...)
+	cciInputVolume := append(append([]linePoint{}, cciWarmupVolume...), extendedVolume...)
 	if tf == "1m" {
 		candles = extendedCandles
 		vol = extendedVolume
@@ -1977,40 +2072,8 @@ func chartDataHandler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "unsupported timeframe", 400)
 			return
 		}
-		for i := 0; i < len(extendedCandles); i += mult {
-			end := i + mult
-			if end > len(extendedCandles) {
-				end = len(extendedCandles)
-			}
-			group := extendedCandles[i:end]
-			if len(group) == 0 {
-				break
-			}
-			o := group[0].Open
-			h := group[0].High
-			l := group[0].Low
-			c := group[len(group)-1].Close
-			v := 0.0
-			for j := i; j < end && j < len(extendedVolume); j++ {
-				v += extendedVolume[j].Value
-			}
-			for _, g := range group {
-				if g.High > h {
-					h = g.High
-				}
-				if g.Low < l {
-					l = g.Low
-				}
-			}
-			candles = append(candles, candlePoint{
-				Time:  group[0].Time,
-				Open:  o,
-				High:  h,
-				Low:   l,
-				Close: c,
-			})
-			vol = append(vol, linePoint{Time: group[0].Time, Value: v})
-		}
+		candles, vol = aggregateCandlePoints(extendedCandles, extendedVolume, mult)
+		cciInputCandles, _ = aggregateCandlePoints(cciInputCandles, cciInputVolume, mult)
 	}
 	var cumPV, cumV float64
 	vwap := make([]linePoint, 0)
@@ -2035,7 +2098,7 @@ func chartDataHandler(w http.ResponseWriter, r *http.Request) {
 			sma = append(sma, linePoint{Time: c.Time, Value: sum / 9})
 		}
 	}
-	cci := calculateCCI(candles, 27)
+	cci := filterLinePointsFromHour(calculateCCI(cciInputCandles, cciPeriod), loc, 7)
 	priorTradingDate, _ := getPriorTradingDate(symbol, dateStr)
 	priorClose, priorVolume := getPriorDayData(symbol, dateStr)
 	metrics := calculateMetrics(extendedCandles, extendedVolume, priorClose, priorVolume)
