@@ -143,6 +143,35 @@
     }
     .btn-outline-light { color: var(--text); border-color: var(--border); }
     .btn-outline-light:hover { background: var(--surface-2); border-color: var(--accent); color: var(--text); }
+    .main-step-controls {
+      display: none;
+      align-items: center;
+      gap: 0.6rem;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      margin: 0.35rem 0 0.75rem;
+    }
+    .main-step-controls.is-visible { display: flex; }
+    #main-next-candle,
+    #main-live-step {
+      min-width: 132px;
+      min-height: 40px;
+    }
+    #main-live-step.is-active {
+      background: var(--positive);
+      border-color: var(--positive);
+      color: #061322;
+      font-weight: 700;
+    }
+    .main-live-status {
+      color: var(--muted);
+      font-size: 0.84rem;
+      min-width: 220px;
+      text-align: right;
+    }
+    .main-live-status.is-live { color: var(--positive); }
+    .main-live-status.is-warn { color: var(--warning); }
+    .main-live-status.is-error { color: var(--negative); }
     #sheet, #news-sheet, #filings-sheet, #context-news-sheet, #context-filings-sheet, #market-radar-leaders, #market-radar-intraday {
       margin-top: 1rem;
       max-width: 100%;
@@ -739,6 +768,11 @@
           <strong data-vwap-distance>--</strong>
         </div>
       </div>
+      <div id="main-step-controls" class="main-step-controls">
+        <button id="main-next-candle" class="btn btn-primary" type="button" disabled>Next candle</button>
+        <button id="main-live-step" class="btn btn-outline-light" type="button" disabled>Live Step: OFF</button>
+        <span id="main-live-status" class="main-live-status">Select a signal time to arm replay.</span>
+      </div>
       <div id="chart" class="border mt-4 rounded"></div>
       <div id="tpo-chart-container" class="tpo-chart-shell"></div>
       <section class="market-radar" data-marketaux-section>
@@ -989,6 +1023,180 @@ function updateVwapSlopePanel(panelId, vwap, candles, cutoffTime = null) {
   panel.querySelector("[data-vwap-delta]").textContent = read.delta;
   panel.querySelector("[data-vwap-distance]").textContent = read.distance;
   panel.querySelector("[data-vwap-hint]").textContent = read.hint;
+}
+
+function setMainLiveStatus(message, tone = "") {
+  const status = document.getElementById("main-live-status");
+  if (!status) return;
+  status.textContent = message;
+  status.className = `main-live-status${tone ? ` is-${tone}` : ""}`;
+}
+
+function currentNyDateString() {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).format(new Date());
+}
+
+function isMainCandleComplete(candle) {
+  if (!candle || !Number.isFinite(Number(candle.time))) return false;
+  if (mainStepDate !== currentNyDateString()) return true;
+  return Number(candle.time) + 60 <= Math.floor(Date.now() / 1000) - 2;
+}
+
+function completedMainCandleCount(candles) {
+  if (!Array.isArray(candles)) return 0;
+  let count = 0;
+  for (const candle of candles) {
+    if (!isMainCandleComplete(candle)) break;
+    count++;
+  }
+  return count;
+}
+
+function mainCurrentCutoffTime() {
+  if (!cachedCandles.length || mainStepVisibleCandles < 1) return null;
+  const idx = Math.min(mainStepVisibleCandles - 1, cachedCandles.length - 1);
+  return cachedCandles[idx]?.time ?? null;
+}
+
+function mainNextLiveTimeLabel() {
+  const cutoff = mainCurrentCutoffTime();
+  if (!Number.isFinite(Number(cutoff))) return "next candle";
+  return `${nyTime(Number(cutoff) + 60)} candle`;
+}
+
+function updateMainStepControls() {
+  const controls = document.getElementById("main-step-controls");
+  const nextButton = document.getElementById("main-next-candle");
+  const liveButton = document.getElementById("main-live-step");
+  if (!controls || !nextButton || !liveButton) return;
+  const timeframe = document.getElementById("timeframe")?.value || "";
+  const canShow = mainStepModeEnabled && cachedCandles.length > 0;
+  const canUse = canShow && timeframe === "1m";
+  const canAdvance = canUse && mainStepVisibleCandles < cachedCandles.length;
+  controls.classList.toggle("is-visible", canShow);
+  nextButton.disabled = !canAdvance;
+  liveButton.disabled = !canUse;
+  liveButton.classList.toggle("is-active", mainLiveStepEnabled);
+  liveButton.textContent = mainLiveStepEnabled ? "Live Step: ON" : "Live Step: OFF";
+}
+
+function stopMainLiveStep(message = "Manual replay") {
+  mainLiveStepEnabled = false;
+  if (mainLiveStepTimer) {
+    clearInterval(mainLiveStepTimer);
+    mainLiveStepTimer = null;
+  }
+  setMainLiveStatus(message);
+  updateMainStepControls();
+}
+
+function disarmMainStep(message = "Select a signal time to arm replay.") {
+  stopMainLiveStep(message);
+  mainStepModeEnabled = false;
+  mainStepStarted = false;
+  mainStepVisibleCandles = 0;
+  mainStepTicker = "";
+  mainStepDate = "";
+  updateMainStepControls();
+}
+
+function armMainStepFromTime(cutoffTime, tickerValue, dateValue) {
+  const timeframe = document.getElementById("timeframe")?.value || "";
+  mainStepModeEnabled = timeframe === "1m" && cachedCandles.length > 0;
+  mainStepStarted = false;
+  mainStepVisibleCandles = cachedCandles.filter(c => c.time <= cutoffTime).length;
+  if (mainStepVisibleCandles < 1) mainStepVisibleCandles = 1;
+  mainStepTicker = String(tickerValue || "").toUpperCase();
+  mainStepDate = String(dateValue || "");
+  stopMainLiveStep(`Armed at ${nyTime(cachedCandles[mainStepVisibleCandles - 1]?.time || cutoffTime)}. Click Next or Live Step.`);
+  updateMainStepControls();
+}
+
+function applyMainStepData(visibleCount) {
+  if (!mainStepModeEnabled || !cachedCandles.length) return;
+  const nextCount = Math.max(1, Math.min(visibleCount, cachedCandles.length));
+  mainStepVisibleCandles = nextCount;
+  mainStepStarted = true;
+  const cutoffTime = cachedCandles[nextCount - 1].time;
+  candleSeries.setData(cachedCandles.slice(0, nextCount));
+  volumeSeries.setData(cachedVolume.filter(v => v.time <= cutoffTime));
+  vwapSeries.setData(cachedVwap.filter(v => v.time <= cutoffTime));
+  smaSeries.setData(cachedSma.filter(v => v.time <= cutoffTime));
+  updateVwapSlopePanel("vwap-slope-panel", cachedVwap, cachedMinCandles, cutoffTime);
+  if (cachedTpoCandles.length) {
+    renderTpoCharts("tpo-chart-container", mainStepTicker, mainStepDate, cachedTpoCandles.filter(c => c.time <= cutoffTime));
+  }
+  updateMainStepControls();
+}
+
+function advanceMainCandle() {
+  if (!mainStepModeEnabled) return;
+  const nextCount = mainStepStarted ? mainStepVisibleCandles + 1 : mainStepVisibleCandles + 1;
+  applyMainStepData(nextCount);
+}
+
+function updateMainLivePayload(data) {
+  const candles = Array.isArray(data?.candles) ? data.candles : [];
+  if (!candles.length) return false;
+  cachedCandles = candles;
+  cachedVolume = Array.isArray(data.volume) ? data.volume : [];
+  cachedMinCandles = Array.isArray(data.minCandles) && data.minCandles.length ? data.minCandles : candles;
+  cachedMinVolume = Array.isArray(data.minVolume) ? data.minVolume : cachedVolume;
+  cachedVwap = Array.isArray(data.vwap) ? data.vwap : [];
+  cachedSma = Array.isArray(data.sma) ? data.sma : [];
+  cachedTpoCandles = cachedMinCandles.map(c => ({ ...c }));
+  const completeCount = completedMainCandleCount(cachedCandles);
+  if (completeCount > mainStepVisibleCandles) {
+    applyMainStepData(Math.min(mainStepVisibleCandles + 1, completeCount));
+    mainLiveStepLastNewAt = Date.now();
+    setMainLiveStatus(`Revealed ${nyTime(cachedCandles[mainStepVisibleCandles - 1].time)}. Waiting for ${mainNextLiveTimeLabel()}...`, "live");
+    return true;
+  }
+  if (mainStepStarted) applyMainStepData(Math.min(mainStepVisibleCandles, cachedCandles.length));
+  return false;
+}
+
+async function pollMainLiveStep() {
+  if (!mainLiveStepEnabled || mainLiveStepPolling) return;
+  mainLiveStepPolling = true;
+  try {
+    const { data } = await axios.get("/api/candles", {
+      params: { ticker: mainStepTicker, timeframe: "1m", date: mainStepDate }
+    });
+    const advanced = updateMainLivePayload(data || {});
+    if (!advanced) {
+      const waiting = `Waiting for ${mainNextLiveTimeLabel()}...`;
+      const stale = mainLiveStepLastNewAt && Date.now() - mainLiveStepLastNewAt > MAIN_LIVE_STALE_MS;
+      setMainLiveStatus(stale ? `${waiting} data delayed` : waiting, stale ? "warn" : "live");
+    }
+  } catch (err) {
+    console.warn("[mainLiveStep] poll failed", err?.response?.data || err.message);
+    setMainLiveStatus("Live Step fetch failed.", "error");
+  } finally {
+    mainLiveStepPolling = false;
+  }
+}
+
+function toggleMainLiveStep() {
+  if (mainLiveStepEnabled) {
+    stopMainLiveStep("Manual replay");
+    return;
+  }
+  if (!mainStepModeEnabled) {
+    setMainLiveStatus("Select a 1m signal time first.", "warn");
+    return;
+  }
+  mainLiveStepEnabled = true;
+  mainLiveStepLastNewAt = Date.now();
+  setMainLiveStatus(`Waiting for ${mainNextLiveTimeLabel()}...`, "live");
+  updateMainStepControls();
+  pollMainLiveStep();
+  mainLiveStepTimer = setInterval(pollMainLiveStep, MAIN_LIVE_POLL_MS);
 }
 
 /* ─── Date picker with current NY date default ───────────── */
@@ -2140,6 +2348,19 @@ let cachedVolume = [];
 let cachedMinCandles = [];
 let cachedMinVolume = [];
 let cachedVwap = [];
+let cachedSma = [];
+let cachedTpoCandles = [];
+let mainStepModeEnabled = false;
+let mainStepStarted = false;
+let mainStepVisibleCandles = 0;
+let mainLiveStepEnabled = false;
+let mainLiveStepTimer = null;
+let mainLiveStepPolling = false;
+let mainLiveStepLastNewAt = 0;
+let mainStepTicker = "";
+let mainStepDate = "";
+const MAIN_LIVE_POLL_MS = 5000;
+const MAIN_LIVE_STALE_MS = 90000;
 let priorDayCloses = {}; // Store prior‑day closes
 let priorDayVolumes = {}; // New: Store prior-day RTH volumes
 let priorDayDates = {};
@@ -2257,6 +2478,8 @@ async function load(e, skipDefaultRow = false){
     cachedCandles=data.candles;cachedVolume=data.volume;
     cachedMinCandles=data.minCandles;cachedMinVolume=data.minVolume;
     cachedVwap=data.vwap;
+    cachedSma=data.sma;
+    cachedTpoCandles=tpoChartCandles;
     candleSeries.setData(data.candles);
     volumeSeries.setData(data.volume);
     vwapSeries.setData(data.vwap);
@@ -2266,6 +2489,7 @@ async function load(e, skipDefaultRow = false){
     setSessionVisibleRange(chart, date);
     drawRthOpenLine(chart, document.getElementById('chart'), date);
     renderTpoCharts('tpo-chart-container', ticker, date, tpoChartCandles);
+    disarmMainStep("Select a signal time to arm replay.");
     if (watchlistMode) {
       currentNews = [];
       currentFilings = [];
@@ -2376,6 +2600,8 @@ async function fetchPriorDayClose(ticker,date){
 }
 
 document.getElementById('form').addEventListener('submit',load);
+document.getElementById('main-next-candle').addEventListener('click', advanceMainCandle);
+document.getElementById('main-live-step').addEventListener('click', toggleMainLiveStep);
 load(); // initial
 
 /* ─── Tabulator grid & navigation ─────────────────────────── */
@@ -2812,6 +3038,7 @@ async function showSignalOnChart(row){
   const hhmm = String(row.time).replace(':','').padStart(4,'0');
   const ts = combineDateAndTime(document.getElementById('tradeDate').value, hhmm);
   updateVwapSlopePanel("vwap-slope-panel", cachedVwap, cachedMinCandles, ts / 1000);
+  armMainStepFromTime(ts / 1000, row.ticker, document.getElementById('tradeDate').value);
   const isBuy = row.signal.toLowerCase() === "buy";
   if (hhmm === '0930') {
     candleSeries.setMarkers([]);

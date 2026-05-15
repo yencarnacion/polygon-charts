@@ -581,13 +581,65 @@
     .btn-outline-light:hover { background: var(--surface-2); border-color: var(--accent); color: var(--text); }
     .signal-step-controls {
       display: none;
+      align-items: center;
+      gap: 0.6rem;
+      flex-wrap: wrap;
       justify-content: flex-end;
       margin: -1rem 0 1.25rem;
     }
-    #signal-next-candle {
+    #signal-next-candle,
+    #signal-live-step {
       min-width: 132px;
       min-height: 44px;
     }
+    #signal-live-step.is-active {
+      background: var(--positive);
+      border-color: var(--positive);
+      color: #061322;
+      font-weight: 700;
+    }
+    .signal-live-status {
+      color: var(--muted);
+      font-size: 0.84rem;
+      min-width: 180px;
+      text-align: right;
+    }
+    .signal-live-status.is-live { color: var(--positive); }
+    .signal-live-status.is-warn { color: var(--warning); }
+    .signal-live-status.is-error { color: var(--negative); }
+    .signal-live-alert {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 44px;
+      max-width: 280px;
+      padding: 0.45rem 0.75rem;
+      border: 2px solid var(--warning);
+      border-radius: 9px;
+      background: #ffd166;
+      color: #061322;
+      font-weight: 800;
+      font-size: 0.86rem;
+      line-height: 1.15;
+      text-transform: uppercase;
+      letter-spacing: 0.02em;
+      box-shadow: 0 0 0 0 rgba(255, 209, 102, 0.75);
+    }
+    .signal-live-alert[hidden] { display: none; }
+    .signal-live-alert.is-flashing {
+      animation: liveAlertPulse 0.9s ease-in-out infinite;
+    }
+    @keyframes liveAlertPulse {
+      0%, 100% {
+        transform: translateY(0);
+        box-shadow: 0 0 0 0 rgba(255, 209, 102, 0.75);
+      }
+      50% {
+        transform: translateY(-1px);
+        box-shadow: 0 0 0 10px rgba(255, 209, 102, 0);
+      }
+    }
+    .signal-step-controls.is-visible { display: flex; }
     @media (max-width: 768px) {
       .signal-step-controls {
         position: fixed;
@@ -598,9 +650,23 @@
         pointer-events: none;
       }
       .signal-step-controls.is-visible { display: flex; }
-      #signal-next-candle {
+      .signal-step-controls > * {
         pointer-events: auto;
+      }
+      #signal-next-candle,
+      #signal-live-step {
         box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+      }
+      .signal-live-status {
+        width: 100%;
+        min-width: 0;
+        padding: 0.3rem 0.5rem;
+        border-radius: 6px;
+        background: rgba(7, 14, 24, 0.82);
+      }
+      .signal-live-alert {
+        max-width: none;
+        width: 100%;
       }
     }
     .market-radar {
@@ -843,11 +909,14 @@
           <strong data-vwap-distance>--</strong>
         </div>
       </div>
+      <div id="signal-step-controls" class="signal-step-controls">
+        <button id="signal-live-alert" class="signal-live-alert" type="button" hidden>New catalyst</button>
+        <button id="signal-next-candle" class="btn btn-primary" type="button" disabled>Next candle</button>
+        <button id="signal-live-step" class="btn btn-outline-light" type="button" disabled>Live Step: OFF</button>
+        <span id="signal-live-status" class="signal-live-status">Manual replay</span>
+      </div>
       <div id="signal-chart" class="border rounded"></div>
       <div id="signal-tpo-chart-container" class="tpo-chart-shell"></div>
-      <div id="signal-step-controls" class="signal-step-controls">
-        <button id="signal-next-candle" class="btn btn-primary" type="button" disabled>Next candle</button>
-      </div>
       <h4>Metrics (as of {{TIME_DISPLAY}})</h4>
       <div id="signal-metrics-sheet"></div>
       <div class="d-flex justify-content-between align-items-center mb-2">
@@ -994,6 +1063,18 @@ let signalTpoChartMinuteCandles = [];
 let signalTpoChartRenderToken = 0;
 let signalVisibleCandles = 0;
 let signalMarker = null;
+let signalLiveStepEnabled = false;
+let signalLiveStepTimer = null;
+let signalLiveStepPolling = false;
+let signalLiveStepLastNewAt = 0;
+let signalLiveExtraTimer = null;
+let signalLiveExtraPolling = false;
+let signalLiveNewsKeys = new Set();
+let signalLiveFilingKeys = new Set();
+let signalAlertAudioContext = null;
+const SIGNAL_LIVE_POLL_MS = 5000;
+const SIGNAL_LIVE_STALE_MS = 90000;
+const SIGNAL_LIVE_EXTRA_POLL_MS = 15000;
 let contextListenersAdded = false;
 let contextLoaded = false;
 let contextDailyChart, contextDailyCandleSeries, contextDailyVolumeSeries;
@@ -1298,6 +1379,243 @@ function isSignalTabActive() {
   return !!(signalTab && signalTab.classList.contains('active'));
 }
 
+function setSignalLiveStatus(message, tone = "") {
+  const status = document.getElementById('signal-live-status');
+  if (!status) return;
+  status.textContent = message;
+  status.className = `signal-live-status${tone ? ` is-${tone}` : ""}`;
+}
+
+function signalNewsKey(item) {
+  return String(item?.id || item?.url || `${item?.published || ""}|${item?.source || ""}|${item?.title || ""}`);
+}
+
+function signalFilingKey(item) {
+  return String(item?.id || item?.linkToFilingDetails || `${item?.filedAt || ""}|${item?.formType || ""}|${item?.description || ""}`);
+}
+
+function refreshSignalExtraBaselines() {
+  signalLiveNewsKeys = new Set(signalCurrentNews.map(signalNewsKey));
+  signalLiveFilingKeys = new Set(signalCurrentFilings.map(signalFilingKey));
+}
+
+function clearSignalLiveAlert() {
+  const alertEl = document.getElementById('signal-live-alert');
+  if (!alertEl) return;
+  alertEl.hidden = true;
+  alertEl.classList.remove('is-flashing');
+  alertEl.textContent = "New catalyst";
+}
+
+function showSignalLiveAlert(newNewsCount, newFilingCount) {
+  const alertEl = document.getElementById('signal-live-alert');
+  if (!alertEl) return;
+  const parts = [];
+  if (newNewsCount) parts.push(`${newNewsCount} news`);
+  if (newFilingCount) parts.push(`${newFilingCount} SEC`);
+  alertEl.textContent = `NEW ${parts.join(" + ")}`;
+  alertEl.hidden = false;
+  alertEl.classList.add('is-flashing');
+}
+
+function unlockSignalAlertSound() {
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  if (!AudioCtx) return;
+  if (!signalAlertAudioContext) {
+    signalAlertAudioContext = new AudioCtx();
+  }
+  if (signalAlertAudioContext.state === "suspended") {
+    signalAlertAudioContext.resume().catch(() => {});
+  }
+}
+
+function playSignalAlertSound() {
+  try {
+    unlockSignalAlertSound();
+    const ctx = signalAlertAudioContext;
+    if (!ctx || ctx.state !== "running") return;
+    const start = ctx.currentTime + 0.02;
+    [880, 1174].forEach((freq, idx) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(freq, start + idx * 0.13);
+      gain.gain.setValueAtTime(0.0001, start + idx * 0.13);
+      gain.gain.exponentialRampToValueAtTime(0.18, start + idx * 0.13 + 0.015);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + idx * 0.13 + 0.11);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(start + idx * 0.13);
+      osc.stop(start + idx * 0.13 + 0.12);
+    });
+  } catch (err) {
+    console.warn('[signalLiveAlert] sound unavailable', err);
+  }
+}
+
+function scrollToSignalCatalysts() {
+  clearSignalLiveAlert();
+  const target = document.getElementById('signal-news-sheet') || document.getElementById('signal-filings-sheet');
+  if (target) {
+    target.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+}
+
+async function pollSignalLiveExtras() {
+  if (!signalLiveStepEnabled || signalLiveExtraPolling) return;
+  signalLiveExtraPolling = true;
+  try {
+    const { data } = await axios.get('/api/extra', { params: { ticker, date, days: 2, profile: 'false' } });
+    const nextNews = Array.isArray(data?.news) ? data.news : [];
+    const nextFilings = Array.isArray(data?.filings) ? data.filings : [];
+    const newNews = nextNews.filter(item => !signalLiveNewsKeys.has(signalNewsKey(item)));
+    const newFilings = nextFilings.filter(item => !signalLiveFilingKeys.has(signalFilingKey(item)));
+    renderSignalNewsAndFilings(nextNews, nextFilings);
+    refreshSignalExtraBaselines();
+    if (newNews.length || newFilings.length) {
+      showSignalLiveAlert(newNews.length, newFilings.length);
+      playSignalAlertSound();
+    }
+  } catch (err) {
+    console.warn('[signalLiveExtras] poll failed', err?.response?.data || err.message);
+  } finally {
+    signalLiveExtraPolling = false;
+  }
+}
+
+function currentNyDateString() {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).format(new Date());
+}
+
+function isSignalCandleComplete(candle) {
+  if (!candle || !Number.isFinite(Number(candle.time))) return false;
+  if (date !== currentNyDateString()) return true;
+  return Number(candle.time) + 60 <= Math.floor(Date.now() / 1000) - 2;
+}
+
+function signalCurrentCutoffTime() {
+  if (!signalRevealCandles.length || signalVisibleCandles < 1) return null;
+  const idx = Math.min(signalVisibleCandles - 1, signalRevealCandles.length - 1);
+  return signalRevealCandles[idx]?.time ?? null;
+}
+
+function signalNextLiveTimeLabel() {
+  const cutoff = signalCurrentCutoffTime();
+  if (!Number.isFinite(Number(cutoff))) return "next candle";
+  return `${nyTime(Number(cutoff) + 60)} candle`;
+}
+
+function completedSignalCandleCount(candles) {
+  if (!Array.isArray(candles)) return 0;
+  let count = 0;
+  for (const candle of candles) {
+    if (!isSignalCandleComplete(candle)) break;
+    count++;
+  }
+  return count;
+}
+
+function stopSignalLiveStep(message = "Live Step: OFF") {
+  signalLiveStepEnabled = false;
+  if (signalLiveStepTimer) {
+    clearInterval(signalLiveStepTimer);
+    signalLiveStepTimer = null;
+  }
+  if (signalLiveExtraTimer) {
+    clearInterval(signalLiveExtraTimer);
+    signalLiveExtraTimer = null;
+  }
+  clearSignalLiveAlert();
+  const button = document.getElementById('signal-live-step');
+  if (button) {
+    button.classList.remove('is-active');
+    button.textContent = "Live Step: OFF";
+  }
+  setSignalLiveStatus(message);
+  updateSignalStepControls();
+}
+
+function applySignalLivePayload(data) {
+  const candles = Array.isArray(data?.candles) ? data.candles : [];
+  if (!candles.length) return false;
+  const visibleBefore = signalVisibleCandles;
+  const completeCount = completedSignalCandleCount(candles);
+  signalRevealCandles = candles;
+  signalRevealVolume = Array.isArray(data.volume) ? data.volume : [];
+  signalRevealVwap = Array.isArray(data.vwap) ? data.vwap : [];
+  signalRevealSma = Array.isArray(data.sma) ? data.sma : [];
+  signalRevealSlopeCandles = Array.isArray(data.minCandles) && data.minCandles.length ? data.minCandles : candles;
+  signalTpoChartMinuteCandles = Array.isArray(data.minCandles) ? data.minCandles.map(c => ({ ...c })) : [];
+  if (completeCount > visibleBefore) {
+    const nextCount = Math.min(visibleBefore + 1, completeCount);
+    applySignalRevealData(nextCount);
+    signalLiveStepLastNewAt = Date.now();
+    setSignalLiveStatus(`Revealed ${nyTime(signalRevealCandles[nextCount - 1].time)}. Waiting for ${signalNextLiveTimeLabel()}...`, "live");
+    return true;
+  }
+  applySignalRevealData(Math.min(visibleBefore, signalRevealCandles.length));
+  return false;
+}
+
+async function pollSignalLiveStep() {
+  if (!signalLiveStepEnabled || signalLiveStepPolling) return;
+  if (!signalStepModeEnabled || timeframe !== "1m") {
+    stopSignalLiveStep(timeframe !== "1m" ? "Live Step needs 1m resolution." : "Live Step unavailable.");
+    return;
+  }
+  signalLiveStepPolling = true;
+  try {
+    const { data } = await axios.get('/api/candles', { params: { ticker, timeframe: '1m', date } });
+    const advanced = applySignalLivePayload(data || {});
+    if (!advanced) {
+      const waiting = `Waiting for ${signalNextLiveTimeLabel()}...`;
+      const stale = signalLiveStepLastNewAt && Date.now() - signalLiveStepLastNewAt > SIGNAL_LIVE_STALE_MS;
+      setSignalLiveStatus(stale ? `${waiting} data delayed` : waiting, stale ? "warn" : "live");
+    }
+  } catch (err) {
+    console.warn('[signalLiveStep] poll failed', err?.response?.data || err.message);
+    setSignalLiveStatus("Live Step fetch failed.", "error");
+  } finally {
+    signalLiveStepPolling = false;
+  }
+}
+
+function toggleSignalLiveStep() {
+  if (signalLiveStepEnabled) {
+    stopSignalLiveStep("Manual replay");
+    return;
+  }
+  if (!signalStepModeEnabled || !signalRevealCandles.length) {
+    setSignalLiveStatus("Open a timed signal chart first.", "warn");
+    return;
+  }
+  if (timeframe !== "1m") {
+    setSignalLiveStatus("Live Step needs 1m resolution.", "warn");
+    return;
+  }
+  unlockSignalAlertSound();
+  refreshSignalExtraBaselines();
+  clearSignalLiveAlert();
+  signalLiveStepEnabled = true;
+  signalLiveStepLastNewAt = Date.now();
+  const button = document.getElementById('signal-live-step');
+  if (button) {
+    button.classList.add('is-active');
+    button.textContent = "Live Step: ON";
+  }
+  setSignalLiveStatus(`Waiting for ${signalNextLiveTimeLabel()}...`, "live");
+  updateSignalStepControls();
+  pollSignalLiveStep();
+  pollSignalLiveExtras();
+  signalLiveStepTimer = setInterval(pollSignalLiveStep, SIGNAL_LIVE_POLL_MS);
+  signalLiveExtraTimer = setInterval(pollSignalLiveExtras, SIGNAL_LIVE_EXTRA_POLL_MS);
+}
+
 function applySignalRevealData(visibleCount) {
   if (!signalStepModeEnabled || !signalRevealCandles.length) return;
   const nextCount = Math.max(1, Math.min(visibleCount, signalRevealCandles.length));
@@ -1328,11 +1646,20 @@ async function updateSignalTpoChart(cutoffTime = null) {
 function updateSignalStepControls() {
   const controls = document.getElementById('signal-step-controls');
   const button = document.getElementById('signal-next-candle');
+  const liveButton = document.getElementById('signal-live-step');
   if (!controls || !button) return;
   const canShow = signalStepModeEnabled && signalRevealCandles.length > 0 && isSignalTabActive();
   const canAdvance = canShow && signalVisibleCandles < signalRevealCandles.length;
   controls.classList.toggle('is-visible', canShow);
   button.disabled = !canAdvance;
+  if (liveButton) {
+    liveButton.disabled = !canShow || timeframe !== "1m";
+    liveButton.classList.toggle('is-active', signalLiveStepEnabled);
+    liveButton.textContent = signalLiveStepEnabled ? "Live Step: ON" : "Live Step: OFF";
+  }
+  if (!canShow && signalLiveStepEnabled) {
+    stopSignalLiveStep("Live Step unavailable.");
+  }
 }
 
 function advanceSignalCandle() {
@@ -1760,12 +2087,19 @@ function renderSignalNewsAndFilings(newsItems, filingsItems) {
   } else {
     signalFilingsTable.setData(signalCurrentFilings);
   }
+  refreshSignalExtraBaselines();
 }
 
 function setupSignalListeners() {
   if (signalListenersAdded) return;
+  document.getElementById('signal-live-alert').addEventListener('click', () => {
+    scrollToSignalCatalysts();
+  });
   document.getElementById('signal-next-candle').addEventListener('click', () => {
     advanceSignalCandle();
+  });
+  document.getElementById('signal-live-step').addEventListener('click', () => {
+    toggleSignalLiveStep();
   });
   document.getElementById('signal-copy-news').addEventListener('click', () => {
     if (signalCurrentNews.length === 0) {
@@ -1814,6 +2148,7 @@ function setupSignalListeners() {
 }
 
 function applySignalChartPayload(data) {
+  stopSignalLiveStep("Manual replay");
   const plottedCandles = data.candles || [];
   const plottedVolume = data.volume || [];
   const plottedVwap = data.vwap || [];
