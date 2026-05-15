@@ -68,6 +68,76 @@
     .vwap-slope-panel.is-up { border-left-color: var(--warning); }
     .vwap-slope-panel.is-down { border-left-color: #ffb38f; }
     .vwap-slope-panel.is-idle { opacity: 0.78; }
+    .cci-panel {
+      display: grid;
+      grid-template-columns: minmax(210px, 1.15fr) repeat(3, minmax(115px, 0.65fr));
+      gap: 0.6rem;
+      align-items: stretch;
+      margin: 0 0 0.75rem;
+      padding: 0.75rem;
+      border: 1px solid var(--border);
+      border-left: 6px solid var(--neutral);
+      border-radius: 10px;
+      background: linear-gradient(135deg, rgba(26, 39, 58, 0.96), rgba(18, 29, 45, 0.96));
+      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.16);
+    }
+    .cci-panel.is-reset {
+      border-left-color: var(--positive);
+      background: linear-gradient(135deg, rgba(22, 72, 58, 0.96), rgba(18, 29, 45, 0.96));
+    }
+    .cci-panel.is-chase {
+      border-left-color: var(--negative);
+      background: linear-gradient(135deg, rgba(86, 38, 33, 0.96), rgba(18, 29, 45, 0.96));
+    }
+    .cci-panel.is-flush { border-left-color: #8ed0ff; }
+    .cci-panel.is-building { border-left-color: var(--warning); }
+    .cci-main,
+    .cci-stat {
+      min-width: 0;
+      border: 1px solid rgba(103, 129, 159, 0.3);
+      border-radius: 8px;
+      background: rgba(7, 14, 24, 0.28);
+      padding: 0.55rem 0.65rem;
+    }
+    .cci-kicker,
+    .cci-stat span {
+      display: block;
+      color: var(--muted);
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      line-height: 1.1;
+    }
+    .cci-state {
+      display: block;
+      margin-top: 0.18rem;
+      color: var(--text);
+      font-size: 1.12rem;
+      font-weight: 700;
+      line-height: 1.05;
+    }
+    .cci-hint {
+      margin-top: 0.32rem;
+      color: var(--muted);
+      font-size: 0.78rem;
+      line-height: 1.25;
+    }
+    .cci-stat strong {
+      display: block;
+      margin-top: 0.22rem;
+      color: var(--text);
+      font-size: 1.05rem;
+      font-variant-numeric: tabular-nums;
+      line-height: 1.1;
+    }
+    .cci-chart {
+      width: 100%;
+      height: 154px;
+      box-sizing: border-box;
+      margin: 0.45rem 0 1.25rem;
+      border-color: var(--border) !important;
+      background: var(--surface);
+    }
     .vwap-slope-main,
     .vwap-slope-stat {
       min-width: 0;
@@ -112,6 +182,12 @@
         grid-template-columns: 1fr 1fr;
       }
       .vwap-slope-main {
+        grid-column: 1 / -1;
+      }
+      .cci-panel {
+        grid-template-columns: 1fr 1fr;
+      }
+      .cci-main {
         grid-column: 1 / -1;
       }
     }
@@ -920,6 +996,25 @@
         <div id="signal-radar-leaders"></div>
         <div id="signal-radar-intraday"></div>
       </section>
+      <div id="signal-cci-panel" class="cci-panel is-idle" aria-live="polite">
+        <div class="cci-main">
+          <span class="cci-kicker">CCI Reset Filter</span>
+          <strong class="cci-state" data-cci-state>Waiting</strong>
+          <div class="cci-hint" data-cci-hint>Load a chart to read stretch and reset context.</div>
+        </div>
+        <div class="cci-stat">
+          <span>CCI 27</span>
+          <strong data-cci-current>--</strong>
+        </div>
+        <div class="cci-stat">
+          <span>Lowest 18</span>
+          <strong data-cci-low>--</strong>
+        </div>
+        <div class="cci-stat">
+          <span>Reset Age</span>
+          <strong data-cci-age>--</strong>
+        </div>
+      </div>
       <div id="signal-vwap-slope-panel" class="vwap-slope-panel is-idle" aria-live="polite">
         <div class="vwap-slope-main">
           <span class="vwap-slope-kicker">VWAP Slope</span>
@@ -947,6 +1042,7 @@
         <span id="signal-live-status" class="signal-live-status">Manual replay</span>
       </div>
       <div id="signal-chart" class="border rounded"></div>
+      <div id="signal-cci-chart" class="cci-chart border rounded"></div>
       <div id="signal-tpo-chart-container" class="tpo-chart-shell"></div>
       <h4>Metrics (as of {{TIME_DISPLAY}})</h4>
       <div id="signal-metrics-sheet"></div>
@@ -1001,6 +1097,25 @@
         <button id="base-downloadCsv" class="btn btn-secondary btn-sm ms-auto">Export CSV</button>
       </div>
       <div id="base-row-indicator"></div>
+      <div id="base-cci-panel" class="cci-panel is-idle" aria-live="polite">
+        <div class="cci-main">
+          <span class="cci-kicker">CCI Reset Filter</span>
+          <strong class="cci-state" data-cci-state>Waiting</strong>
+          <div class="cci-hint" data-cci-hint>Load a chart to read stretch and reset context.</div>
+        </div>
+        <div class="cci-stat">
+          <span>CCI 27</span>
+          <strong data-cci-current>--</strong>
+        </div>
+        <div class="cci-stat">
+          <span>Lowest 18</span>
+          <strong data-cci-low>--</strong>
+        </div>
+        <div class="cci-stat">
+          <span>Reset Age</span>
+          <strong data-cci-age>--</strong>
+        </div>
+      </div>
       <div id="base-vwap-slope-panel" class="vwap-slope-panel is-idle" aria-live="polite">
         <div class="vwap-slope-main">
           <span class="vwap-slope-kicker">VWAP Slope</span>
@@ -1021,6 +1136,7 @@
         </div>
       </div>
       <div id="base-chart" class="border mt-4 rounded"></div>
+      <div id="base-cci-chart" class="cci-chart border rounded"></div>
       <div id="base-tpo-chart-container" class="tpo-chart-shell"></div>
       <div id="base-sheet"></div>
       <div class="d-flex justify-content-between align-items-center mb-2">
@@ -1080,15 +1196,17 @@ const ntfyTopic = {{NTFY_TOPIC_JSON}};
 const ntfyTagOptions = {{NTFY_TAG_OPTIONS_JSON}};
 // Signal Chart Logic
 let signalListenersAdded = false;
-let signalChart, signalCandleSeries, signalVolumeSeries, signalVwapSeries, signalSmaSeries;
+let signalChart, signalCandleSeries, signalVolumeSeries, signalVwapSeries, signalSmaSeries, signalCciPlot;
 let signalMetricsTable, signalNewsTable, signalFilingsTable;
 let signalCurrentNews = [], signalCurrentFilings = [];
+let signalAllNews = [], signalAllFilings = [];
 let signalKeyListenerAdded = false;
 let signalStepModeEnabled = false;
 let signalRevealCandles = [];
 let signalRevealVolume = [];
 let signalRevealVwap = [];
 let signalRevealSma = [];
+let signalRevealCci = [];
 let signalRevealSlopeCandles = [];
 let signalTpoChartMinuteCandles = [];
 let signalTpoChartRenderToken = 0;
@@ -1376,6 +1494,126 @@ function updateVwapSlopePanel(panelId, vwap, candles, cutoffTime = null) {
   panel.querySelector("[data-vwap-hint]").textContent = read.hint;
 }
 
+const CCI_PERIOD = 27;
+const CCI_RESET_LOOKBACK = 18;
+
+function calculateCciSeries(candles, period = CCI_PERIOD) {
+  if (!Array.isArray(candles) || candles.length < period) return [];
+  const typical = candles.map(c => (Number(c.high) + Number(c.low) + Number(c.close)) / 3);
+  const out = [];
+  let sum = 0;
+  for (let i = 0; i < candles.length; i++) {
+    sum += typical[i];
+    if (i >= period) sum -= typical[i - period];
+    if (i < period - 1) continue;
+    const sma = sum / period;
+    let md = 0;
+    for (let j = i - period + 1; j <= i; j++) {
+      md += Math.abs(typical[j] - sma);
+    }
+    md /= period;
+    if (!md) continue;
+    out.push({ time: candles[i].time, value: (typical[i] - sma) / (0.015 * md) });
+  }
+  return out;
+}
+
+function cciText(value) {
+  return Number.isFinite(value) ? String(Math.round(value)) : "--";
+}
+
+function calculateCciRead(cci, cutoffTime = null) {
+  const lastIndex = findLastPointIndex(cci, cutoffTime);
+  if (lastIndex < 0) {
+    return {
+      cssClass: "is-idle",
+      state: "Waiting",
+      current: "--",
+      low: "--",
+      age: "--",
+      hint: "Need 27 plotted candles to calculate CCI."
+    };
+  }
+  const start = Math.max(0, lastIndex - CCI_RESET_LOOKBACK + 1);
+  let low = Infinity;
+  let lowIndex = start;
+  for (let i = start; i <= lastIndex; i++) {
+    if (cci[i].value < low) {
+      low = cci[i].value;
+      lowIndex = i;
+    }
+  }
+  const current = cci[lastIndex].value;
+  const ageBars = lastIndex - lowIndex;
+  const timeLabel = nyTime(cci[lastIndex].time);
+  let cssClass = "is-building";
+  let state = "Balanced";
+  let hint = `As of ${timeLabel}: CCI is near its recent mean. Let price/VWAP define direction.`;
+  if (current <= -200) {
+    cssClass = "is-flush";
+    state = "Flush Stretch";
+    hint = `As of ${timeLabel}: downside stretch is extreme. Watch for absorption and reclaim before considering a reversal scalp.`;
+  } else if (low <= -100 && current > -50 && current < 175) {
+    cssClass = "is-reset";
+    state = "Reset Ready";
+    hint = `As of ${timeLabel}: CCI recently reset below -100 and recovered. Better long-continuation context than chasing highs.`;
+  } else if (low <= -100) {
+    cssClass = "is-building";
+    state = "Reset Forming";
+    hint = `As of ${timeLabel}: a pullback reset is present, but CCI has not recovered enough. Wait for reclaim/tape confirmation.`;
+  } else if (current >= 200) {
+    cssClass = "is-chase";
+    state = "Chase Risk";
+    hint = `As of ${timeLabel}: CCI is very extended. Avoid late breakout buys unless price builds a fresh base.`;
+  } else if (current >= 100) {
+    cssClass = "is-chase";
+    state = "Extended";
+    hint = `As of ${timeLabel}: upside momentum is stretched. Continuation can work, but the next entry needs a clean pullback.`;
+  }
+  return {
+    cssClass,
+    state,
+    current: cciText(current),
+    low: cciText(low),
+    age: `${ageBars} bar${ageBars === 1 ? "" : "s"}`,
+    hint
+  };
+}
+
+function updateCciPanel(panelId, cci, cutoffTime = null) {
+  const panel = document.getElementById(panelId);
+  if (!panel) return;
+  const read = calculateCciRead(cci, cutoffTime);
+  panel.className = `cci-panel ${read.cssClass}`;
+  panel.querySelector("[data-cci-state]").textContent = read.state;
+  panel.querySelector("[data-cci-current]").textContent = read.current;
+  panel.querySelector("[data-cci-low]").textContent = read.low;
+  panel.querySelector("[data-cci-age]").textContent = read.age;
+  panel.querySelector("[data-cci-hint]").textContent = read.hint;
+}
+
+function initCciChart(containerId) {
+  const el = document.getElementById(containerId);
+  const cciChart = LightweightCharts.createChart(el, {
+    height: 154,
+    layout: { background: { color: '#121d2d' }, textColor: '#d7e4f4' },
+    grid: { vertLines: { color: '#26364d' }, horzLines: { color: '#26364d' } },
+    rightPriceScale: { scaleMargins: { top: 0.12, bottom: 0.12 } },
+    timeScale: { timeVisible: true, secondsVisible: false },
+    localization: { timeFormatter: nyTime }
+  });
+  cciChart.timeScale().applyOptions({ tickMarkFormatter: nyTime });
+  const line = cciChart.addLineSeries({
+    color: '#c084fc',
+    lineWidth: 2,
+    priceFormat: { type: 'price', precision: 0, minMove: 1 }
+  });
+  line.createPriceLine({ price: 100, color: '#ff8a5a', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: '+100' });
+  line.createPriceLine({ price: 0, color: '#8ca0bc', lineWidth: 1, lineStyle: 3, axisLabelVisible: true, title: '0' });
+  line.createPriceLine({ price: -100, color: '#21c58f', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: '-100' });
+  return { chart: cciChart, line };
+}
+
 
 function initSignalChart() {
    signalChart = LightweightCharts.createChart(document.getElementById('signal-chart'),{
@@ -1397,6 +1635,7 @@ signalChart.timeScale().applyOptions({ tickMarkFormatter: nyTime }); // ★ axis
   signalChart.priceScale('vol').applyOptions({ scaleMargins: { top: 0.75, bottom: 0 } });
   signalVwapSeries = signalChart.addLineSeries({ color: '#ffd166', lineWidth: 2 });
   signalSmaSeries = signalChart.addLineSeries({ color: '#5fb3ff', lineWidth: 2 });
+  signalCciPlot = initCciChart('signal-cci-chart');
 }
 
 function hasTypingFocus() {
@@ -1426,9 +1665,49 @@ function signalFilingKey(item) {
   return String(item?.id || item?.linkToFilingDetails || `${item?.filedAt || ""}|${item?.formType || ""}|${item?.description || ""}`);
 }
 
+function signalEventTime(item, field) {
+  const raw = item?.[field];
+  if (!raw) return null;
+  const ms = Date.parse(raw);
+  if (!Number.isFinite(ms)) return null;
+  return Math.floor(ms / 1000);
+}
+
+function signalVisibleCutoff(cutoffTime = null) {
+  const rawCutoff = Number.isFinite(Number(cutoffTime)) ? Number(cutoffTime) : signalCurrentCutoffTime();
+  if (!Number.isFinite(Number(rawCutoff))) {
+    if (hasSignalTime) {
+      const hhmm = String(timeStr).replace(':','').padStart(4,'0');
+      return (combineDateAndTime(date, hhmm) / 1000) + 60;
+    }
+    return Infinity;
+  }
+  return Number(rawCutoff) + 60;
+}
+
 function refreshSignalExtraBaselines() {
   signalLiveNewsKeys = new Set(signalCurrentNews.map(signalNewsKey));
   signalLiveFilingKeys = new Set(signalCurrentFilings.map(signalFilingKey));
+}
+
+function applySignalExtraCutoff(cutoffTime = null, options = {}) {
+  const cutoff = signalVisibleCutoff(cutoffTime);
+  const nextNews = signalAllNews.filter(item => {
+    const eventTime = signalEventTime(item, "published");
+    return eventTime === null || eventTime <= cutoff;
+  });
+  const nextFilings = signalAllFilings.filter(item => {
+    const eventTime = signalEventTime(item, "filedAt");
+    return eventTime === null || eventTime <= cutoff;
+  });
+  const newNews = nextNews.filter(item => !signalLiveNewsKeys.has(signalNewsKey(item)));
+  const newFilings = nextFilings.filter(item => !signalLiveFilingKeys.has(signalFilingKey(item)));
+  renderSignalNewsAndFilings(nextNews, nextFilings, { refreshBaseline: false });
+  if (options.alertNew && (newNews.length || newFilings.length)) {
+    showSignalLiveAlert(newNews.length, newFilings.length);
+    playSignalAlertSound();
+  }
+  refreshSignalExtraBaselines();
 }
 
 function clearSignalLiveAlert() {
@@ -1498,16 +1777,9 @@ async function pollSignalLiveExtras() {
   signalLiveExtraPolling = true;
   try {
     const { data } = await axios.get('/api/extra', { params: { ticker, date, days: 2, profile: 'false' } });
-    const nextNews = Array.isArray(data?.news) ? data.news : [];
-    const nextFilings = Array.isArray(data?.filings) ? data.filings : [];
-    const newNews = nextNews.filter(item => !signalLiveNewsKeys.has(signalNewsKey(item)));
-    const newFilings = nextFilings.filter(item => !signalLiveFilingKeys.has(signalFilingKey(item)));
-    renderSignalNewsAndFilings(nextNews, nextFilings);
-    refreshSignalExtraBaselines();
-    if (newNews.length || newFilings.length) {
-      showSignalLiveAlert(newNews.length, newFilings.length);
-      playSignalAlertSound();
-    }
+    signalAllNews = Array.isArray(data?.news) ? data.news : [];
+    signalAllFilings = Array.isArray(data?.filings) ? data.filings : [];
+    applySignalExtraCutoff(signalCurrentCutoffTime(), { alertNew: true });
   } catch (err) {
     console.warn('[signalLiveExtras] poll failed', err?.response?.data || err.message);
   } finally {
@@ -1617,6 +1889,7 @@ function applySignalLivePayload(data) {
   signalRevealVolume = Array.isArray(data.volume) ? data.volume : [];
   signalRevealVwap = Array.isArray(data.vwap) ? data.vwap : [];
   signalRevealSma = Array.isArray(data.sma) ? data.sma : [];
+  signalRevealCci = Array.isArray(data.cci) && data.cci.length ? data.cci : calculateCciSeries(candles);
   signalRevealSlopeCandles = Array.isArray(data.minCandles) && data.minCandles.length ? data.minCandles : candles;
   signalTpoChartMinuteCandles = Array.isArray(data.minCandles) ? data.minCandles.map(c => ({ ...c })) : [];
   if (completeCount > visibleBefore) {
@@ -1687,6 +1960,7 @@ function toggleSignalLiveStep() {
 
 function applySignalRevealData(visibleCount) {
   if (!signalStepModeEnabled || !signalRevealCandles.length) return;
+  const previousVisible = signalVisibleCandles;
   const nextCount = Math.max(1, Math.min(visibleCount, signalRevealCandles.length));
   signalVisibleCandles = nextCount;
   const cutoffTime = signalRevealCandles[nextCount - 1].time;
@@ -1694,12 +1968,15 @@ function applySignalRevealData(visibleCount) {
   signalVolumeSeries.setData(signalRevealVolume.filter(v => v.time <= cutoffTime));
   signalVwapSeries.setData(signalRevealVwap.filter(v => v.time <= cutoffTime));
   signalSmaSeries.setData(signalRevealSma.filter(v => v.time <= cutoffTime));
+  signalCciPlot.line.setData(signalRevealCci.filter(v => v.time <= cutoffTime));
   if (signalMarker && signalMarker.time <= cutoffTime) {
     signalCandleSeries.setMarkers([signalMarker]);
   } else {
     signalCandleSeries.setMarkers([]);
   }
   updateVwapSlopePanel('signal-vwap-slope-panel', signalRevealVwap, signalRevealSlopeCandles.length ? signalRevealSlopeCandles : signalRevealCandles, cutoffTime);
+  updateCciPanel('signal-cci-panel', signalRevealCci, cutoffTime);
+  applySignalExtraCutoff(cutoffTime, { alertNew: previousVisible > 0 && nextCount > previousVisible });
   updateSignalTpoChart(cutoffTime);
   updateSignalStepControls();
 }
@@ -2105,7 +2382,8 @@ function renderSignalProfile(profile) {
   }
 }
 
-function renderSignalNewsAndFilings(newsItems, filingsItems) {
+function renderSignalNewsAndFilings(newsItems, filingsItems, options = {}) {
+  const refreshBaseline = options.refreshBaseline !== false;
   signalCurrentNews = Array.isArray(newsItems) ? newsItems : [];
   signalCurrentFilings = Array.isArray(filingsItems) ? filingsItems : [];
   const newsColumns = [
@@ -2156,7 +2434,9 @@ function renderSignalNewsAndFilings(newsItems, filingsItems) {
   } else {
     signalFilingsTable.setData(signalCurrentFilings);
   }
-  refreshSignalExtraBaselines();
+  if (refreshBaseline) {
+    refreshSignalExtraBaselines();
+  }
 }
 
 function setupSignalListeners() {
@@ -2222,23 +2502,27 @@ function applySignalChartPayload(data) {
   const plottedVolume = data.volume || [];
   const plottedVwap = data.vwap || [];
   const plottedSma = data.sma || [];
+  const plottedCci = Array.isArray(data.cci) && data.cci.length ? data.cci : calculateCciSeries(plottedCandles);
   const tpoChartMinCandles = Array.isArray(data.minCandles) ? data.minCandles.map(c => ({ ...c })) : [];
   const slopeCandles = tpoChartMinCandles.length ? tpoChartMinCandles : plottedCandles;
   signalCandleSeries.setData(plottedCandles);
   signalVolumeSeries.setData(plottedVolume);
   signalVwapSeries.setData(plottedVwap);
   signalSmaSeries.setData(plottedSma);
+  signalCciPlot.line.setData(plottedCci);
   signalStepModeEnabled = false;
   signalRevealCandles = [];
   signalRevealVolume = [];
   signalRevealVwap = [];
   signalRevealSma = [];
+  signalRevealCci = [];
   signalRevealSlopeCandles = [];
   signalTpoChartMinuteCandles = tpoChartMinCandles.map(c => ({ ...c }));
   signalVisibleCandles = 0;
   signalMarker = null;
   updateSignalStepControls();
   updateVwapSlopePanel('signal-vwap-slope-panel', plottedVwap, slopeCandles);
+  updateCciPanel('signal-cci-panel', plottedCci);
   if (hasSignalTime) {
     const hhmm = String(timeStr).replace(':','').padStart(4,'0');
     const ts = combineDateAndTime(date, hhmm) / 1000;
@@ -2264,6 +2548,7 @@ function applySignalChartPayload(data) {
       signalRevealVolume = plottedVolume;
       signalRevealVwap = plottedVwap;
       signalRevealSma = plottedSma;
+      signalRevealCci = plottedCci;
       signalRevealSlopeCandles = slopeCandles;
       applySignalRevealData(initialCount);
     }
@@ -2271,12 +2556,14 @@ function applySignalChartPayload(data) {
     signalCandleSeries.setMarkers([]);
   }
   setSessionVisibleRange(signalChart, date);
+  setSessionVisibleRange(signalCciPlot.chart, date);
   drawRthOpenLine(signalChart, document.getElementById('signal-chart'), date);
   if (!hasSignalTime || !signalStepModeEnabled) {
     const tpoChartCutoff = hasSignalTime ? combineDateAndTime(date, String(timeStr).replace(':','').padStart(4,'0')) / 1000 : null;
     updateSignalTpoChart(tpoChartCutoff);
   }
   signalChart.resize(document.getElementById('signal-chart').clientWidth, 600);
+  signalCciPlot.chart.resize(document.getElementById('signal-cci-chart').clientWidth, 154);
 }
 
 async function loadSignalPrimaryChart() {
@@ -2306,7 +2593,9 @@ async function loadSignalProfile() {
 async function loadSignalExtras() {
   try {
     const { data } = await axios.get('/api/extra', { params: { ticker, date, days: 2, profile: 'false' } });
-    renderSignalNewsAndFilings(data?.news || [], data?.filings || []);
+    signalAllNews = Array.isArray(data?.news) ? data.news : [];
+    signalAllFilings = Array.isArray(data?.filings) ? data.filings : [];
+    applySignalExtraCutoff(signalCurrentCutoffTime(), { alertNew: false });
   } catch (err) {
     console.warn('[signalExtra] unavailable', err?.response?.data || err.message);
   }
@@ -2345,6 +2634,8 @@ async function loadSignalChart() {
     setupSignalKeyNavigation();
     setupSignalListeners();
     renderSignalMetricsRow(buildSignalMetricsRow({}));
+    signalAllNews = [];
+    signalAllFilings = [];
     renderSignalNewsAndFilings([], []);
 
     loadSignalProfile();
@@ -2703,9 +2994,10 @@ async function loadContextTab() {
 // Base Chart Logic
 let baseListenersAdded = false;
 let baseCsvData = [], baseCurrentRow = 0, baseIsCsvUploaded = false;
-let baseChart, baseCandleSeries, baseVolumeSeries, baseVwapSeries, baseSmaSeries;
+let baseChart, baseCandleSeries, baseVolumeSeries, baseVwapSeries, baseSmaSeries, baseCciPlot;
 let baseCachedCandles = [], baseCachedVolume = [], baseCachedMinCandles = [], baseCachedMinVolume = [];
 let baseCachedVwap = [];
+let baseCachedCci = [];
 let basePriorDayCloses = {}, basePriorDayVolumes = {}, basePriorDayDates = {};
 let baseCurrentNews = [], baseCurrentFilings = [];
 
@@ -2730,6 +3022,7 @@ baseChart.timeScale().applyOptions({ tickMarkFormatter: nyTime }); // ★ axis t
   baseChart.priceScale('vol').applyOptions({ scaleMargins: { top: 0.75, bottom: 0 } });
   baseVwapSeries = baseChart.addLineSeries({ color: '#ffd166', lineWidth: 2 });
   baseSmaSeries = baseChart.addLineSeries({ color: '#5fb3ff', lineWidth: 2 });
+  baseCciPlot = initCciChart('base-cci-chart');
 }
 
 const nyFormatter = new Intl.DateTimeFormat('en-CA', {
@@ -3478,18 +3771,23 @@ async function loadBaseChart(e, skipDefaultRow = false) {
       if (i >= 9) sum -= data.candles[i - 9].close;
       if (i >= 8) data.sma.push({ time: data.candles[i].time, value: sum / 9 });
     }
+    data.cci = calculateCciSeries(data.candles);
     baseCachedCandles = data.candles;
     baseCachedVolume = data.volume;
     baseCachedMinCandles = data.minCandles;
     baseCachedMinVolume = data.minVolume;
     baseCachedVwap = data.vwap;
+    baseCachedCci = data.cci;
     baseCandleSeries.setData(data.candles);
     baseVolumeSeries.setData(data.volume);
     baseVwapSeries.setData(data.vwap);
     baseSmaSeries.setData(data.sma);
+    baseCciPlot.line.setData(data.cci);
     updateVwapSlopePanel('base-vwap-slope-panel', baseCachedVwap, baseCachedMinCandles);
+    updateCciPanel('base-cci-panel', baseCachedCci);
     baseCandleSeries.setMarkers([]);
     setSessionVisibleRange(baseChart, baseDate);
+    setSessionVisibleRange(baseCciPlot.chart, baseDate);
     drawRthOpenLine(baseChart, document.getElementById('base-chart'), baseDate);
     renderTpoCharts('base-tpo-chart-container', baseTicker, baseDate, baseTpoChartCandles);
     const pending = [displayBaseExtra(baseTicker, baseDate)];
@@ -3507,7 +3805,9 @@ async function loadBaseChart(e, skipDefaultRow = false) {
         baseVolumeSeries.setData([]);
         baseVwapSeries.setData([]);
         baseSmaSeries.setData([]);
+        baseCciPlot.line.setData([]);
         updateVwapSlopePanel('base-vwap-slope-panel', [], []);
+        updateCciPanel('base-cci-panel', []);
         return;
       }
       const row = {
@@ -3543,6 +3843,7 @@ async function loadBaseChart(e, skipDefaultRow = false) {
     }
     // Resize chart after data is loaded
     baseChart.resize(document.getElementById('base-chart').clientWidth, 600);
+    baseCciPlot.chart.resize(document.getElementById('base-cci-chart').clientWidth, 154);
   } catch (err) {
     console.error('[baseLoad] error', err);
     alert('Error: ' + (err.response?.data || err));
@@ -3710,6 +4011,7 @@ async function showBaseSignalOnChart(row) {
   const hhmm = String(row.time).replace(':','').padStart(4,'0');
   const ts = combineDateAndTime(date, hhmm);
   updateVwapSlopePanel('base-vwap-slope-panel', baseCachedVwap, baseCachedMinCandles, ts / 1000);
+  updateCciPanel('base-cci-panel', baseCachedCci, ts / 1000);
   const isBuy = row.signal.toLowerCase() === "buy";
   if (hhmm === '0930') {
     baseCandleSeries.setMarkers([]);
@@ -3850,6 +4152,7 @@ if (!baseListenersAdded) {
 document.getElementById('signal-tab').addEventListener('shown.bs.tab', () => {
   if (signalChart) {
     signalChart.resize(document.getElementById('signal-chart').clientWidth, 600);
+    signalCciPlot.chart.resize(document.getElementById('signal-cci-chart').clientWidth, 154);
   }
   updateSignalStepControls();
 });
@@ -3857,6 +4160,7 @@ document.getElementById('base-tab').addEventListener('shown.bs.tab', () => {
   if (!baseChart) {
     initBaseChart();
   }
+  baseCciPlot.chart.resize(document.getElementById('base-cci-chart').clientWidth, 154);
   loadBaseChart();
 });
 document.getElementById('context-tab').addEventListener('shown.bs.tab', () => {

@@ -69,6 +69,76 @@
     .vwap-slope-panel.is-up { border-left-color: var(--warning); }
     .vwap-slope-panel.is-down { border-left-color: #ffb38f; }
     .vwap-slope-panel.is-idle { opacity: 0.78; }
+    .cci-panel {
+      display: grid;
+      grid-template-columns: minmax(210px, 1.15fr) repeat(3, minmax(115px, 0.65fr));
+      gap: 0.6rem;
+      align-items: stretch;
+      margin: 0 0 0.75rem;
+      padding: 0.75rem;
+      border: 1px solid var(--border);
+      border-left: 6px solid var(--neutral);
+      border-radius: 10px;
+      background: linear-gradient(135deg, rgba(26, 39, 58, 0.96), rgba(18, 29, 45, 0.96));
+      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.16);
+    }
+    .cci-panel.is-reset {
+      border-left-color: var(--positive);
+      background: linear-gradient(135deg, rgba(22, 72, 58, 0.96), rgba(18, 29, 45, 0.96));
+    }
+    .cci-panel.is-chase {
+      border-left-color: var(--negative);
+      background: linear-gradient(135deg, rgba(86, 38, 33, 0.96), rgba(18, 29, 45, 0.96));
+    }
+    .cci-panel.is-flush { border-left-color: #8ed0ff; }
+    .cci-panel.is-building { border-left-color: var(--warning); }
+    .cci-main,
+    .cci-stat {
+      min-width: 0;
+      border: 1px solid rgba(103, 129, 159, 0.3);
+      border-radius: 8px;
+      background: rgba(7, 14, 24, 0.28);
+      padding: 0.55rem 0.65rem;
+    }
+    .cci-kicker,
+    .cci-stat span {
+      display: block;
+      color: var(--muted);
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      line-height: 1.1;
+    }
+    .cci-state {
+      display: block;
+      margin-top: 0.18rem;
+      color: var(--text);
+      font-size: 1.12rem;
+      font-weight: 700;
+      line-height: 1.05;
+    }
+    .cci-hint {
+      margin-top: 0.32rem;
+      color: var(--muted);
+      font-size: 0.78rem;
+      line-height: 1.25;
+    }
+    .cci-stat strong {
+      display: block;
+      margin-top: 0.22rem;
+      color: var(--text);
+      font-size: 1.05rem;
+      font-variant-numeric: tabular-nums;
+      line-height: 1.1;
+    }
+    .cci-chart {
+      width: 100%;
+      height: 154px;
+      box-sizing: border-box;
+      margin: 0.45rem 0 1.25rem;
+      border-color: var(--border) !important;
+      background: var(--surface);
+    }
     .vwap-slope-main,
     .vwap-slope-stat {
       min-width: 0;
@@ -113,6 +183,12 @@
         grid-template-columns: 1fr 1fr;
       }
       .vwap-slope-main {
+        grid-column: 1 / -1;
+      }
+      .cci-panel {
+        grid-template-columns: 1fr 1fr;
+      }
+      .cci-main {
         grid-column: 1 / -1;
       }
     }
@@ -749,6 +825,25 @@
         <button id="downloadCsv" class="btn btn-secondary btn-sm ms-auto">Export CSV</button>
       </div>
       <div id="row-indicator"></div>
+      <div id="cci-panel" class="cci-panel is-idle" aria-live="polite">
+        <div class="cci-main">
+          <span class="cci-kicker">CCI Reset Filter</span>
+          <strong class="cci-state" data-cci-state>Waiting</strong>
+          <div class="cci-hint" data-cci-hint>Load a chart to read stretch and reset context.</div>
+        </div>
+        <div class="cci-stat">
+          <span>CCI 27</span>
+          <strong data-cci-current>--</strong>
+        </div>
+        <div class="cci-stat">
+          <span>Lowest 18</span>
+          <strong data-cci-low>--</strong>
+        </div>
+        <div class="cci-stat">
+          <span>Reset Age</span>
+          <strong data-cci-age>--</strong>
+        </div>
+      </div>
       <div id="vwap-slope-panel" class="vwap-slope-panel is-idle" aria-live="polite">
         <div class="vwap-slope-main">
           <span class="vwap-slope-kicker">VWAP Slope</span>
@@ -774,6 +869,7 @@
         <span id="main-live-status" class="main-live-status">Select a signal time to arm replay.</span>
       </div>
       <div id="chart" class="border mt-4 rounded"></div>
+      <div id="cci-chart" class="cci-chart border rounded"></div>
       <div id="tpo-chart-container" class="tpo-chart-shell"></div>
       <section class="market-radar" data-marketaux-section>
         <div class="d-flex justify-content-between align-items-center gap-2 flex-wrap">
@@ -1025,6 +1121,126 @@ function updateVwapSlopePanel(panelId, vwap, candles, cutoffTime = null) {
   panel.querySelector("[data-vwap-hint]").textContent = read.hint;
 }
 
+const CCI_PERIOD = 27;
+const CCI_RESET_LOOKBACK = 18;
+
+function calculateCciSeries(candles, period = CCI_PERIOD) {
+  if (!Array.isArray(candles) || candles.length < period) return [];
+  const typical = candles.map(c => (Number(c.high) + Number(c.low) + Number(c.close)) / 3);
+  const out = [];
+  let sum = 0;
+  for (let i = 0; i < candles.length; i++) {
+    sum += typical[i];
+    if (i >= period) sum -= typical[i - period];
+    if (i < period - 1) continue;
+    const sma = sum / period;
+    let md = 0;
+    for (let j = i - period + 1; j <= i; j++) {
+      md += Math.abs(typical[j] - sma);
+    }
+    md /= period;
+    if (!md) continue;
+    out.push({ time: candles[i].time, value: (typical[i] - sma) / (0.015 * md) });
+  }
+  return out;
+}
+
+function cciText(value) {
+  return Number.isFinite(value) ? String(Math.round(value)) : "--";
+}
+
+function calculateCciRead(cci, cutoffTime = null) {
+  const lastIndex = findLastPointIndex(cci, cutoffTime);
+  if (lastIndex < 0) {
+    return {
+      cssClass: "is-idle",
+      state: "Waiting",
+      current: "--",
+      low: "--",
+      age: "--",
+      hint: "Need 27 plotted candles to calculate CCI."
+    };
+  }
+  const start = Math.max(0, lastIndex - CCI_RESET_LOOKBACK + 1);
+  let low = Infinity;
+  let lowIndex = start;
+  for (let i = start; i <= lastIndex; i++) {
+    if (cci[i].value < low) {
+      low = cci[i].value;
+      lowIndex = i;
+    }
+  }
+  const current = cci[lastIndex].value;
+  const ageBars = lastIndex - lowIndex;
+  const timeLabel = nyTime(cci[lastIndex].time);
+  let cssClass = "is-building";
+  let state = "Balanced";
+  let hint = `As of ${timeLabel}: CCI is near its recent mean. Let price/VWAP define direction.`;
+  if (current <= -200) {
+    cssClass = "is-flush";
+    state = "Flush Stretch";
+    hint = `As of ${timeLabel}: downside stretch is extreme. Watch for absorption and reclaim before considering a reversal scalp.`;
+  } else if (low <= -100 && current > -50 && current < 175) {
+    cssClass = "is-reset";
+    state = "Reset Ready";
+    hint = `As of ${timeLabel}: CCI recently reset below -100 and recovered. Better long-continuation context than chasing highs.`;
+  } else if (low <= -100) {
+    cssClass = "is-building";
+    state = "Reset Forming";
+    hint = `As of ${timeLabel}: a pullback reset is present, but CCI has not recovered enough. Wait for reclaim/tape confirmation.`;
+  } else if (current >= 200) {
+    cssClass = "is-chase";
+    state = "Chase Risk";
+    hint = `As of ${timeLabel}: CCI is very extended. Avoid late breakout buys unless price builds a fresh base.`;
+  } else if (current >= 100) {
+    cssClass = "is-chase";
+    state = "Extended";
+    hint = `As of ${timeLabel}: upside momentum is stretched. Continuation can work, but the next entry needs a clean pullback.`;
+  }
+  return {
+    cssClass,
+    state,
+    current: cciText(current),
+    low: cciText(low),
+    age: `${ageBars} bar${ageBars === 1 ? "" : "s"}`,
+    hint
+  };
+}
+
+function updateCciPanel(panelId, cci, cutoffTime = null) {
+  const panel = document.getElementById(panelId);
+  if (!panel) return;
+  const read = calculateCciRead(cci, cutoffTime);
+  panel.className = `cci-panel ${read.cssClass}`;
+  panel.querySelector("[data-cci-state]").textContent = read.state;
+  panel.querySelector("[data-cci-current]").textContent = read.current;
+  panel.querySelector("[data-cci-low]").textContent = read.low;
+  panel.querySelector("[data-cci-age]").textContent = read.age;
+  panel.querySelector("[data-cci-hint]").textContent = read.hint;
+}
+
+function initCciChart(containerId) {
+  const el = document.getElementById(containerId);
+  const cciChart = LightweightCharts.createChart(el, {
+    height: 154,
+    layout: { background: { color: '#121d2d' }, textColor: '#d7e4f4' },
+    grid: { vertLines: { color: '#26364d' }, horzLines: { color: '#26364d' } },
+    rightPriceScale: { scaleMargins: { top: 0.12, bottom: 0.12 } },
+    timeScale: { timeVisible: true, secondsVisible: false },
+    localization: { timeFormatter: nyTime }
+  });
+  cciChart.timeScale().applyOptions({ tickMarkFormatter: nyTime });
+  const line = cciChart.addLineSeries({
+    color: '#c084fc',
+    lineWidth: 2,
+    priceFormat: { type: 'price', precision: 0, minMove: 1 }
+  });
+  line.createPriceLine({ price: 100, color: '#ff8a5a', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: '+100' });
+  line.createPriceLine({ price: 0, color: '#8ca0bc', lineWidth: 1, lineStyle: 3, axisLabelVisible: true, title: '0' });
+  line.createPriceLine({ price: -100, color: '#21c58f', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: '-100' });
+  return { chart: cciChart, line };
+}
+
 function setMainLiveStatus(message, tone = "") {
   const status = document.getElementById("main-live-status");
   if (!status) return;
@@ -1127,7 +1343,9 @@ function applyMainStepData(visibleCount) {
   volumeSeries.setData(cachedVolume.filter(v => v.time <= cutoffTime));
   vwapSeries.setData(cachedVwap.filter(v => v.time <= cutoffTime));
   smaSeries.setData(cachedSma.filter(v => v.time <= cutoffTime));
+  cciPlot.line.setData(cachedCci.filter(v => v.time <= cutoffTime));
   updateVwapSlopePanel("vwap-slope-panel", cachedVwap, cachedMinCandles, cutoffTime);
+  updateCciPanel("cci-panel", cachedCci, cutoffTime);
   if (cachedTpoCandles.length) {
     renderTpoCharts("tpo-chart-container", mainStepTicker, mainStepDate, cachedTpoCandles.filter(c => c.time <= cutoffTime));
   }
@@ -1149,6 +1367,7 @@ function updateMainLivePayload(data) {
   cachedMinVolume = Array.isArray(data.minVolume) ? data.minVolume : cachedVolume;
   cachedVwap = Array.isArray(data.vwap) ? data.vwap : [];
   cachedSma = Array.isArray(data.sma) ? data.sma : [];
+  cachedCci = Array.isArray(data.cci) && data.cci.length ? data.cci : calculateCciSeries(candles);
   cachedTpoCandles = cachedMinCandles.map(c => ({ ...c }));
   const completeCount = completedMainCandleCount(cachedCandles);
   if (completeCount > mainStepVisibleCandles) {
@@ -2341,6 +2560,7 @@ chart.priceScale('right').applyOptions({scaleMargins:{top:0.05,bottom:0.35}});
 chart.priceScale('vol').applyOptions({scaleMargins:{top:0.75,bottom:0}});
 const vwapSeries = chart.addLineSeries({color:'#ffd166',lineWidth:2});
 const smaSeries = chart.addLineSeries({color:'#5fb3ff',lineWidth:2});
+const cciPlot = initCciChart('cci-chart');
 
 /* ─── Global data storage ────────────────────────────────── */
 let cachedCandles = [];
@@ -2349,6 +2569,7 @@ let cachedMinCandles = [];
 let cachedMinVolume = [];
 let cachedVwap = [];
 let cachedSma = [];
+let cachedCci = [];
 let cachedTpoCandles = [];
 let mainStepModeEnabled = false;
 let mainStepStarted = false;
@@ -2474,19 +2695,24 @@ async function load(e, skipDefaultRow = false){
         data.sma.push({time: data.candles[i].time, value: sum / 9});
       }
     }
+    data.cci = calculateCciSeries(data.candles);
     /* Cache */
     cachedCandles=data.candles;cachedVolume=data.volume;
     cachedMinCandles=data.minCandles;cachedMinVolume=data.minVolume;
     cachedVwap=data.vwap;
     cachedSma=data.sma;
+    cachedCci=data.cci;
     cachedTpoCandles=tpoChartCandles;
     candleSeries.setData(data.candles);
     volumeSeries.setData(data.volume);
     vwapSeries.setData(data.vwap);
     smaSeries.setData(data.sma);
+    cciPlot.line.setData(data.cci);
     updateVwapSlopePanel("vwap-slope-panel", cachedVwap, cachedMinCandles);
+    updateCciPanel("cci-panel", cachedCci);
     candleSeries.setMarkers([]);
     setSessionVisibleRange(chart, date);
+    setSessionVisibleRange(cciPlot.chart, date);
     drawRthOpenLine(chart, document.getElementById('chart'), date);
     renderTpoCharts('tpo-chart-container', ticker, date, tpoChartCandles);
     disarmMainStep("Select a signal time to arm replay.");
@@ -2520,6 +2746,8 @@ async function load(e, skipDefaultRow = false){
         volumeSeries.setData([]);
         vwapSeries.setData([]);
         smaSeries.setData([]);
+        cciPlot.line.setData([]);
+        updateCciPanel("cci-panel", []);
         if (contextTabActive && !watchlistMode) {
           await loadContextTab(true);
         }
@@ -3038,6 +3266,7 @@ async function showSignalOnChart(row){
   const hhmm = String(row.time).replace(':','').padStart(4,'0');
   const ts = combineDateAndTime(document.getElementById('tradeDate').value, hhmm);
   updateVwapSlopePanel("vwap-slope-panel", cachedVwap, cachedMinCandles, ts / 1000);
+  updateCciPanel("cci-panel", cachedCci, ts / 1000);
   armMainStepFromTime(ts / 1000, row.ticker, document.getElementById('tradeDate').value);
   const isBuy = row.signal.toLowerCase() === "buy";
   if (hhmm === '0930') {
@@ -3215,6 +3444,7 @@ document.getElementById('postToPatternfolio').addEventListener('click', async ()
 
 document.getElementById('main-tab').addEventListener('shown.bs.tab', () => {
   chart.resize(document.getElementById('chart').clientWidth, 600);
+  cciPlot.chart.resize(document.getElementById('cci-chart').clientWidth, 154);
 });
 document.getElementById('context-tab').addEventListener('shown.bs.tab', () => {
   loadContextTab();
@@ -3222,6 +3452,7 @@ document.getElementById('context-tab').addEventListener('shown.bs.tab', () => {
 
 window.addEventListener('resize', () => {
   chart.resize(document.getElementById('chart').clientWidth, 600);
+  cciPlot.chart.resize(document.getElementById('cci-chart').clientWidth, 154);
   if (contextDailyChart) {
     contextDailyChart.resize(document.getElementById('context-daily-chart').clientWidth, 600);
   }

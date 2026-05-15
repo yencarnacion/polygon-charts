@@ -100,6 +100,7 @@ type payload struct {
 	MinVolume  []linePoint   `json:"minVolume"`
 	VWAP       []linePoint   `json:"vwap"`
 	SMA9       []linePoint   `json:"sma"`
+	CCI        []linePoint   `json:"cci"`
 }
 
 type PolygonTickerDetails struct {
@@ -239,6 +240,42 @@ func clamp(v, minV, maxV float64) float64 {
 		return maxV
 	}
 	return v
+}
+
+func calculateCCI(candles []candlePoint, period int) []linePoint {
+	if period < 2 || len(candles) < period {
+		return []linePoint{}
+	}
+	tp := make([]float64, len(candles))
+	for i, c := range candles {
+		tp[i] = (c.High + c.Low + c.Close) / 3
+	}
+	out := make([]linePoint, 0, len(candles)-period+1)
+	var sum float64
+	for i := range candles {
+		sum += tp[i]
+		if i >= period {
+			sum -= tp[i-period]
+		}
+		if i < period-1 {
+			continue
+		}
+		sma := sum / float64(period)
+		var md float64
+		start := i - period + 1
+		for j := start; j <= i; j++ {
+			md += math.Abs(tp[j] - sma)
+		}
+		md /= float64(period)
+		if md == 0 {
+			continue
+		}
+		out = append(out, linePoint{
+			Time:  candles[i].Time,
+			Value: (tp[i] - sma) / (0.015 * md),
+		})
+	}
+	return out
 }
 
 func normalizeTrendScore(raw float64) float64 {
@@ -1314,7 +1351,8 @@ func candlesHandler(w http.ResponseWriter, r *http.Request) {
 			sma = append(sma, linePoint{Time: c.Time, Value: sum / 9})
 		}
 	}
-	out := payload{Candles: candles, Volume: vol, MinCandles: minCandles, MinVolume: minVolume, VWAP: vwap, SMA9: sma}
+	cci := calculateCCI(candles, 27)
+	out := payload{Candles: candles, Volume: vol, MinCandles: minCandles, MinVolume: minVolume, VWAP: vwap, SMA9: sma, CCI: cci}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(out)
 }
@@ -1994,6 +2032,7 @@ func chartDataHandler(w http.ResponseWriter, r *http.Request) {
 			sma = append(sma, linePoint{Time: c.Time, Value: sum / 9})
 		}
 	}
+	cci := calculateCCI(candles, 27)
 	priorTradingDate, _ := getPriorTradingDate(symbol, dateStr)
 	priorClose, priorVolume := getPriorDayData(symbol, dateStr)
 	metrics := calculateMetrics(extendedCandles, extendedVolume, priorClose, priorVolume)
@@ -2119,6 +2158,7 @@ func chartDataHandler(w http.ResponseWriter, r *http.Request) {
 		"minVolume":          extendedVolume,
 		"vwap":               vwap,
 		"sma":                sma,
+		"cci":                cci,
 		"metrics":            metrics,
 		"prior_trading_date": priorTradingDate,
 		"news":               uniqueNews,
