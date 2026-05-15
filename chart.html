@@ -1007,8 +1007,8 @@
           <strong data-cci-current>--</strong>
         </div>
         <div class="cci-stat">
-          <span>Lowest 18</span>
-          <strong data-cci-low>--</strong>
+          <span data-cci-extreme-label>Lowest 18</span>
+          <strong data-cci-extreme>--</strong>
         </div>
         <div class="cci-stat">
           <span>Reset Age</span>
@@ -1108,8 +1108,8 @@
           <strong data-cci-current>--</strong>
         </div>
         <div class="cci-stat">
-          <span>Lowest 18</span>
-          <strong data-cci-low>--</strong>
+          <span data-cci-extreme-label>Lowest 18</span>
+          <strong data-cci-extreme>--</strong>
         </div>
         <div class="cci-stat">
           <span>Reset Age</span>
@@ -1522,72 +1522,113 @@ function cciText(value) {
   return Number.isFinite(value) ? String(Math.round(value)) : "--";
 }
 
-function calculateCciRead(cci, cutoffTime = null) {
+function cciSide(side) {
+  const normalized = String(side || "").toLowerCase();
+  return normalized === "sell" || normalized === "short" ? "short" : "long";
+}
+
+function calculateCciRead(cci, cutoffTime = null, side = "buy") {
+  const tradeSide = cciSide(side);
   const lastIndex = findLastPointIndex(cci, cutoffTime);
   if (lastIndex < 0) {
     return {
       cssClass: "is-idle",
       state: "Waiting",
       current: "--",
-      low: "--",
+      extremeLabel: tradeSide === "short" ? "Highest 18" : "Lowest 18",
+      extreme: "--",
       age: "--",
       hint: "Need 27 plotted candles to calculate CCI."
     };
   }
   const start = Math.max(0, lastIndex - CCI_RESET_LOOKBACK + 1);
   let low = Infinity;
+  let high = -Infinity;
   let lowIndex = start;
+  let highIndex = start;
   for (let i = start; i <= lastIndex; i++) {
     if (cci[i].value < low) {
       low = cci[i].value;
       lowIndex = i;
     }
+    if (cci[i].value > high) {
+      high = cci[i].value;
+      highIndex = i;
+    }
   }
   const current = cci[lastIndex].value;
-  const ageBars = lastIndex - lowIndex;
+  const extreme = tradeSide === "short" ? high : low;
+  const extremeIndex = tradeSide === "short" ? highIndex : lowIndex;
+  const ageBars = lastIndex - extremeIndex;
   const timeLabel = nyTime(cci[lastIndex].time);
   let cssClass = "is-building";
   let state = "Balanced";
   let hint = `As of ${timeLabel}: CCI is near its recent mean. Let price/VWAP define direction.`;
-  if (current <= -200) {
-    cssClass = "is-flush";
-    state = "Flush Stretch";
-    hint = `As of ${timeLabel}: downside stretch is extreme. Watch for absorption and reclaim before considering a reversal scalp.`;
-  } else if (low <= -100 && current > -50 && current < 175) {
-    cssClass = "is-reset";
-    state = "Reset Ready";
-    hint = `As of ${timeLabel}: CCI recently reset below -100 and recovered. Better long-continuation context than chasing highs.`;
-  } else if (low <= -100) {
-    cssClass = "is-building";
-    state = "Reset Forming";
-    hint = `As of ${timeLabel}: a pullback reset is present, but CCI has not recovered enough. Wait for reclaim/tape confirmation.`;
-  } else if (current >= 200) {
-    cssClass = "is-chase";
-    state = "Chase Risk";
-    hint = `As of ${timeLabel}: CCI is very extended. Avoid late breakout buys unless price builds a fresh base.`;
-  } else if (current >= 100) {
-    cssClass = "is-chase";
-    state = "Extended";
-    hint = `As of ${timeLabel}: upside momentum is stretched. Continuation can work, but the next entry needs a clean pullback.`;
+  if (tradeSide === "short") {
+    if (current >= 200) {
+      cssClass = "is-flush";
+      state = "Squeeze Stretch";
+      hint = `As of ${timeLabel}: upside stretch is extreme. Watch for rejection and lower-high confirmation before considering a reversal scalp.`;
+    } else if (high >= 100 && current < 50 && current > -175) {
+      cssClass = "is-reset";
+      state = "Reset Ready";
+      hint = `As of ${timeLabel}: CCI recently reset above +100 and rolled over. Better short-continuation context than chasing lows.`;
+    } else if (high >= 100) {
+      cssClass = "is-building";
+      state = "Reset Forming";
+      hint = `As of ${timeLabel}: a rally reset is present, but CCI has not rolled over enough. Wait for rejection/tape confirmation.`;
+    } else if (current <= -200) {
+      cssClass = "is-chase";
+      state = "Chase Risk";
+      hint = `As of ${timeLabel}: CCI is very extended downside. Avoid late breakdown shorts unless price builds a fresh base.`;
+    } else if (current <= -100) {
+      cssClass = "is-chase";
+      state = "Extended";
+      hint = `As of ${timeLabel}: downside momentum is stretched. Continuation can work, but the next entry needs a clean bounce.`;
+    }
+  } else {
+    if (current <= -200) {
+      cssClass = "is-flush";
+      state = "Flush Stretch";
+      hint = `As of ${timeLabel}: downside stretch is extreme. Watch for absorption and reclaim before considering a reversal scalp.`;
+    } else if (low <= -100 && current > -50 && current < 175) {
+      cssClass = "is-reset";
+      state = "Reset Ready";
+      hint = `As of ${timeLabel}: CCI recently reset below -100 and recovered. Better long-continuation context than chasing highs.`;
+    } else if (low <= -100) {
+      cssClass = "is-building";
+      state = "Reset Forming";
+      hint = `As of ${timeLabel}: a pullback reset is present, but CCI has not recovered enough. Wait for reclaim/tape confirmation.`;
+    } else if (current >= 200) {
+      cssClass = "is-chase";
+      state = "Chase Risk";
+      hint = `As of ${timeLabel}: CCI is very extended. Avoid late breakout buys unless price builds a fresh base.`;
+    } else if (current >= 100) {
+      cssClass = "is-chase";
+      state = "Extended";
+      hint = `As of ${timeLabel}: upside momentum is stretched. Continuation can work, but the next entry needs a clean pullback.`;
+    }
   }
   return {
     cssClass,
     state,
     current: cciText(current),
-    low: cciText(low),
+    extremeLabel: tradeSide === "short" ? "Highest 18" : "Lowest 18",
+    extreme: cciText(extreme),
     age: `${ageBars} bar${ageBars === 1 ? "" : "s"}`,
     hint
   };
 }
 
-function updateCciPanel(panelId, cci, cutoffTime = null) {
+function updateCciPanel(panelId, cci, cutoffTime = null, side = "buy") {
   const panel = document.getElementById(panelId);
   if (!panel) return;
-  const read = calculateCciRead(cci, cutoffTime);
+  const read = calculateCciRead(cci, cutoffTime, side);
   panel.className = `cci-panel ${read.cssClass}`;
   panel.querySelector("[data-cci-state]").textContent = read.state;
   panel.querySelector("[data-cci-current]").textContent = read.current;
-  panel.querySelector("[data-cci-low]").textContent = read.low;
+  panel.querySelector("[data-cci-extreme-label]").textContent = read.extremeLabel;
+  panel.querySelector("[data-cci-extreme]").textContent = read.extreme;
   panel.querySelector("[data-cci-age]").textContent = read.age;
   panel.querySelector("[data-cci-hint]").textContent = read.hint;
 }
@@ -1975,7 +2016,7 @@ function applySignalRevealData(visibleCount) {
     signalCandleSeries.setMarkers([]);
   }
   updateVwapSlopePanel('signal-vwap-slope-panel', signalRevealVwap, signalRevealSlopeCandles.length ? signalRevealSlopeCandles : signalRevealCandles, cutoffTime);
-  updateCciPanel('signal-cci-panel', signalRevealCci, cutoffTime);
+  updateCciPanel('signal-cci-panel', signalRevealCci, cutoffTime, signal);
   applySignalExtraCutoff(cutoffTime, { alertNew: previousVisible > 0 && nextCount > previousVisible });
   updateSignalTpoChart(cutoffTime);
   updateSignalStepControls();
@@ -2522,7 +2563,7 @@ function applySignalChartPayload(data) {
   signalMarker = null;
   updateSignalStepControls();
   updateVwapSlopePanel('signal-vwap-slope-panel', plottedVwap, slopeCandles);
-  updateCciPanel('signal-cci-panel', plottedCci);
+  updateCciPanel('signal-cci-panel', plottedCci, null, signal);
   if (hasSignalTime) {
     const hhmm = String(timeStr).replace(':','').padStart(4,'0');
     const ts = combineDateAndTime(date, hhmm) / 1000;
@@ -4011,7 +4052,7 @@ async function showBaseSignalOnChart(row) {
   const hhmm = String(row.time).replace(':','').padStart(4,'0');
   const ts = combineDateAndTime(date, hhmm);
   updateVwapSlopePanel('base-vwap-slope-panel', baseCachedVwap, baseCachedMinCandles, ts / 1000);
-  updateCciPanel('base-cci-panel', baseCachedCci, ts / 1000);
+  updateCciPanel('base-cci-panel', baseCachedCci, ts / 1000, row.signal);
   const isBuy = row.signal.toLowerCase() === "buy";
   if (hhmm === '0930') {
     baseCandleSeries.setMarkers([]);
