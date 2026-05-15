@@ -45,6 +45,77 @@
       border-color: var(--border) !important;
       background: var(--surface);
     }
+    .vwap-slope-panel {
+      display: grid;
+      grid-template-columns: minmax(190px, 1.15fr) repeat(3, minmax(115px, 0.65fr));
+      gap: 0.6rem;
+      align-items: stretch;
+      margin: 1rem 0 0.75rem;
+      padding: 0.75rem;
+      border: 1px solid var(--border);
+      border-left: 6px solid var(--neutral);
+      border-radius: 10px;
+      background: linear-gradient(135deg, rgba(26, 39, 58, 0.96), rgba(18, 29, 45, 0.96));
+      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.18);
+    }
+    .vwap-slope-panel.is-top {
+      border-left-color: var(--negative);
+      background: linear-gradient(135deg, rgba(86, 38, 33, 0.96), rgba(18, 29, 45, 0.96));
+    }
+    .vwap-slope-panel.is-flush {
+      border-left-color: var(--positive);
+      background: linear-gradient(135deg, rgba(22, 72, 58, 0.96), rgba(18, 29, 45, 0.96));
+    }
+    .vwap-slope-panel.is-up { border-left-color: var(--warning); }
+    .vwap-slope-panel.is-down { border-left-color: #ffb38f; }
+    .vwap-slope-panel.is-idle { opacity: 0.78; }
+    .vwap-slope-main,
+    .vwap-slope-stat {
+      min-width: 0;
+      border: 1px solid rgba(103, 129, 159, 0.3);
+      border-radius: 8px;
+      background: rgba(7, 14, 24, 0.28);
+      padding: 0.55rem 0.65rem;
+    }
+    .vwap-slope-kicker,
+    .vwap-slope-stat span {
+      display: block;
+      color: var(--muted);
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      line-height: 1.1;
+    }
+    .vwap-slope-state {
+      display: block;
+      margin-top: 0.18rem;
+      color: var(--text);
+      font-size: 1.15rem;
+      font-weight: 700;
+      line-height: 1.05;
+    }
+    .vwap-slope-hint {
+      margin-top: 0.32rem;
+      color: var(--muted);
+      font-size: 0.78rem;
+      line-height: 1.25;
+    }
+    .vwap-slope-stat strong {
+      display: block;
+      margin-top: 0.22rem;
+      color: var(--text);
+      font-size: 1.05rem;
+      font-variant-numeric: tabular-nums;
+      line-height: 1.1;
+    }
+    @media (max-width: 760px) {
+      .vwap-slope-panel {
+        grid-template-columns: 1fr 1fr;
+      }
+      .vwap-slope-main {
+        grid-column: 1 / -1;
+      }
+    }
     .nav-tabs { border-color: var(--border); margin-bottom: 1rem; }
     .nav-tabs .nav-link { color: var(--muted); border-color: transparent; }
     .nav-tabs .nav-link.active {
@@ -649,6 +720,25 @@
         <button id="downloadCsv" class="btn btn-secondary btn-sm ms-auto">Export CSV</button>
       </div>
       <div id="row-indicator"></div>
+      <div id="vwap-slope-panel" class="vwap-slope-panel is-idle" aria-live="polite">
+        <div class="vwap-slope-main">
+          <span class="vwap-slope-kicker">VWAP Slope</span>
+          <strong class="vwap-slope-state" data-vwap-state>Waiting</strong>
+          <div class="vwap-slope-hint" data-vwap-hint>Load a chart to read VWAP impulse.</div>
+        </div>
+        <div class="vwap-slope-stat">
+          <span>Slope 5m</span>
+          <strong data-vwap-slope>--</strong>
+        </div>
+        <div class="vwap-slope-stat">
+          <span>Decel</span>
+          <strong data-vwap-delta>--</strong>
+        </div>
+        <div class="vwap-slope-stat">
+          <span>Price vs VWAP</span>
+          <strong data-vwap-distance>--</strong>
+        </div>
+      </div>
       <div id="chart" class="border mt-4 rounded"></div>
       <div id="tpo-chart-container" class="tpo-chart-shell"></div>
       <section class="market-radar" data-marketaux-section>
@@ -797,6 +887,109 @@ const nyDate = ts =>
     const day = String(d.getUTCDate()).padStart(2, '0');
     return `${y}-${m}-${day}`;
   })();
+
+function findLastPointIndex(points, cutoffTime = null, maxIndex = null) {
+  if (!Array.isArray(points) || points.length === 0) return -1;
+  const upper = Math.min(points.length - 1, maxIndex ?? points.length - 1);
+  if (!Number.isFinite(Number(cutoffTime))) return upper;
+  for (let i = upper; i >= 0; i--) {
+    if (points[i].time <= cutoffTime) return i;
+  }
+  return -1;
+}
+
+function findPointAtOrBefore(points, targetTime, maxIndex) {
+  for (let i = Math.min(maxIndex, points.length - 1); i >= 0; i--) {
+    if (points[i].time <= targetTime) return i;
+  }
+  return -1;
+}
+
+function signedNumber(value, digits = 2) {
+  if (!Number.isFinite(value)) return "--";
+  return `${value >= 0 ? "+" : ""}${value.toFixed(digits)}`;
+}
+
+function calculateVwapSlopeRead(vwap, candles, cutoffTime = null) {
+  const lastIndex = findLastPointIndex(vwap, cutoffTime);
+  if (lastIndex < 1) {
+    return {
+      cssClass: "is-idle",
+      state: "Waiting",
+      slope: "--",
+      delta: "--",
+      distance: "--",
+      hint: "Need more VWAP points."
+    };
+  }
+  const now = vwap[lastIndex];
+  const prevIndex = findPointAtOrBefore(vwap, now.time - 5 * 60, lastIndex - 1);
+  if (prevIndex < 0) {
+    return {
+      cssClass: "is-idle",
+      state: "Building",
+      slope: "--",
+      delta: "--",
+      distance: "--",
+      hint: "Need 5 minutes of VWAP history."
+    };
+  }
+  const prev = vwap[prevIndex];
+  const prev2Index = findPointAtOrBefore(vwap, prev.time - 5 * 60, prevIndex - 1);
+  const minutes = Math.max((now.time - prev.time) / 60, 1);
+  const slopeBps = ((now.value - prev.value) / Math.max(prev.value, 0.0001) * 10000) / minutes;
+  let deltaBps = null;
+  if (prev2Index >= 0) {
+    const prev2 = vwap[prev2Index];
+    const prevMinutes = Math.max((prev.time - prev2.time) / 60, 1);
+    const prevSlopeBps = ((prev.value - prev2.value) / Math.max(prev2.value, 0.0001) * 10000) / prevMinutes;
+    deltaBps = slopeBps - prevSlopeBps;
+  }
+  const candleIndex = findLastPointIndex(candles, now.time);
+  const close = candleIndex >= 0 ? candles[candleIndex].close : null;
+  const distancePct = Number.isFinite(close) ? ((close - now.value) / now.value) * 100 : null;
+  const decelThreshold = 0.25;
+  let cssClass = "is-neutral";
+  let state = "Balanced";
+  let hint = `As of ${nyTime(now.time)}: VWAP impulse is mixed or flat.`;
+  if (slopeBps > 0.05 && Number.isFinite(deltaBps) && deltaBps <= -decelThreshold) {
+    cssClass = distancePct !== null && distancePct > 1 ? "is-top" : "is-up";
+    state = distancePct !== null && distancePct > 1 ? "TOP WATCH" : "UP DECEL";
+    hint = `As of ${nyTime(now.time)}: VWAP is rising slower. Watch failed bounces or pivot breaks.`;
+  } else if (slopeBps < -0.05 && Number.isFinite(deltaBps) && deltaBps >= decelThreshold) {
+    cssClass = distancePct !== null && distancePct < -1 ? "is-flush" : "is-down";
+    state = distancePct !== null && distancePct < -1 ? "FLUSH WATCH" : "DOWN DECEL";
+    hint = `As of ${nyTime(now.time)}: VWAP is falling slower. Watch reclaims or higher lows.`;
+  } else if (slopeBps > 0.05 && Number.isFinite(deltaBps) && deltaBps > decelThreshold) {
+    cssClass = "is-up";
+    state = "UP ACCEL";
+    hint = `As of ${nyTime(now.time)}: VWAP impulse is still expanding upward.`;
+  } else if (slopeBps < -0.05 && Number.isFinite(deltaBps) && deltaBps < -decelThreshold) {
+    cssClass = "is-down";
+    state = "DOWN ACCEL";
+    hint = `As of ${nyTime(now.time)}: VWAP impulse is still expanding downward.`;
+  }
+  return {
+    cssClass,
+    state,
+    slope: `${signedNumber(slopeBps)} bps/min`,
+    delta: Number.isFinite(deltaBps) ? `${signedNumber(deltaBps)} bps/min` : "--",
+    distance: Number.isFinite(distancePct) ? `${signedNumber(distancePct)}%` : "--",
+    hint
+  };
+}
+
+function updateVwapSlopePanel(panelId, vwap, candles, cutoffTime = null) {
+  const panel = document.getElementById(panelId);
+  if (!panel) return;
+  const read = calculateVwapSlopeRead(vwap, candles, cutoffTime);
+  panel.className = `vwap-slope-panel ${read.cssClass}`;
+  panel.querySelector("[data-vwap-state]").textContent = read.state;
+  panel.querySelector("[data-vwap-slope]").textContent = read.slope;
+  panel.querySelector("[data-vwap-delta]").textContent = read.delta;
+  panel.querySelector("[data-vwap-distance]").textContent = read.distance;
+  panel.querySelector("[data-vwap-hint]").textContent = read.hint;
+}
 
 /* ─── Date picker with current NY date default ───────────── */
 const nyFormatter = new Intl.DateTimeFormat('en-CA',{
@@ -1946,6 +2139,7 @@ let cachedCandles = [];
 let cachedVolume = [];
 let cachedMinCandles = [];
 let cachedMinVolume = [];
+let cachedVwap = [];
 let priorDayCloses = {}; // Store prior‑day closes
 let priorDayVolumes = {}; // New: Store prior-day RTH volumes
 let priorDayDates = {};
@@ -2062,10 +2256,12 @@ async function load(e, skipDefaultRow = false){
     /* Cache */
     cachedCandles=data.candles;cachedVolume=data.volume;
     cachedMinCandles=data.minCandles;cachedMinVolume=data.minVolume;
+    cachedVwap=data.vwap;
     candleSeries.setData(data.candles);
     volumeSeries.setData(data.volume);
     vwapSeries.setData(data.vwap);
     smaSeries.setData(data.sma);
+    updateVwapSlopePanel("vwap-slope-panel", cachedVwap, cachedMinCandles);
     candleSeries.setMarkers([]);
     setSessionVisibleRange(chart, date);
     drawRthOpenLine(chart, document.getElementById('chart'), date);
@@ -2615,6 +2811,7 @@ async function showSignalOnChart(row){
   updateOpenChartLink(row.ticker);
   const hhmm = String(row.time).replace(':','').padStart(4,'0');
   const ts = combineDateAndTime(document.getElementById('tradeDate').value, hhmm);
+  updateVwapSlopePanel("vwap-slope-panel", cachedVwap, cachedMinCandles, ts / 1000);
   const isBuy = row.signal.toLowerCase() === "buy";
   if (hhmm === '0930') {
     candleSeries.setMarkers([]);
