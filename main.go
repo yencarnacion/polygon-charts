@@ -1930,22 +1930,25 @@ func chartDataHandler(w http.ResponseWriter, r *http.Request) {
 		lastTime = b.T
 	}
 	if len(extendedCandles) > 0 {
-		extendTime := time.UnixMilli(lastTime).In(loc).Add(time.Minute)
-		for extendTime.Hour() < 16 {
-			if extendTime.Hour() >= 7 {
-				extendedCandles = append(extendedCandles, candlePoint{
-					Time:  extendTime.Unix(),
-					Open:  lastClose,
-					High:  lastClose,
-					Low:   lastClose,
-					Close: lastClose,
-				})
-				extendedVolume = append(extendedVolume, linePoint{
-					Time:  extendTime.Unix(),
-					Value: 0,
-				})
+		isCurrentDate := time.Now().In(loc).Format("2006-01-02") == dateStr
+		if timeStr != "" || !isCurrentDate {
+			extendTime := time.UnixMilli(lastTime).In(loc).Add(time.Minute)
+			for extendTime.Hour() < 16 {
+				if extendTime.Hour() >= 7 {
+					extendedCandles = append(extendedCandles, candlePoint{
+						Time:  extendTime.Unix(),
+						Open:  lastClose,
+						High:  lastClose,
+						Low:   lastClose,
+						Close: lastClose,
+					})
+					extendedVolume = append(extendedVolume, linePoint{
+						Time:  extendTime.Unix(),
+						Value: 0,
+					})
+				}
+				extendTime = extendTime.Add(time.Minute)
 			}
-			extendTime = extendTime.Add(time.Minute)
 		}
 	}
 	var candles []candlePoint

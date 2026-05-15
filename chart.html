@@ -1044,7 +1044,7 @@
       <div id="signal-chart" class="border rounded"></div>
       <div id="signal-cci-chart" class="cci-chart border rounded"></div>
       <div id="signal-tpo-chart-container" class="tpo-chart-shell"></div>
-      <h4>Metrics (as of {{TIME_DISPLAY}})</h4>
+      <h4 id="signal-metrics-title">Metrics (as of {{TIME_DISPLAY}})</h4>
       <div id="signal-metrics-sheet"></div>
       <div class="d-flex justify-content-between align-items-center mb-2">
         <h4 class="mb-0">News Headlines for the Day</h4>
@@ -1222,6 +1222,8 @@ let signalLiveExtraPolling = false;
 let signalLiveNewsKeys = new Set();
 let signalLiveFilingKeys = new Set();
 let signalAlertAudioContext = null;
+let signalImplicitLatestMode = false;
+let signalAsOfTimeLabel = "";
 const SIGNAL_LIVE_POLL_MS = 5000;
 const SIGNAL_LIVE_STALE_MS = 90000;
 const SIGNAL_LIVE_EXTRA_POLL_MS = 15000;
@@ -1837,6 +1839,17 @@ function currentNyDateString() {
   }).format(new Date());
 }
 
+function currentNyMinutes() {
+  const [hour, minute] = nyHourMinute(Date.now());
+  return hour * 60 + minute;
+}
+
+function isSignalDataSessionOpen() {
+  if (date !== currentNyDateString()) return false;
+  const mins = currentNyMinutes();
+  return mins >= 7 * 60 && mins < 16 * 60;
+}
+
 function isSignalCandleComplete(candle) {
   if (!candle || !Number.isFinite(Number(candle.time))) return false;
   if (date !== currentNyDateString()) return true;
@@ -1858,8 +1871,9 @@ function signalNextLiveTimeLabel() {
 function updateSignalLiveCountdown() {
   const countdown = document.getElementById('signal-live-countdown');
   if (!countdown) return;
-  countdown.classList.toggle('is-visible', signalLiveStepEnabled);
-  if (!signalLiveStepEnabled) {
+  const showCountdown = signalLiveStepEnabled || (signalStepModeEnabled && signalImplicitLatestMode && isSignalDataSessionOpen() && isSignalTabActive());
+  countdown.classList.toggle('is-visible', showCountdown);
+  if (!showCountdown) {
     countdown.textContent = "T-00:00";
     countdown.classList.remove('is-hot');
     return;
@@ -1921,6 +1935,20 @@ function stopSignalLiveStep(message = "Live Step: OFF") {
   updateSignalStepControls();
 }
 
+function setSignalAsOfTime(cutoffTime = null) {
+  if (Number.isFinite(Number(cutoffTime))) {
+    signalAsOfTimeLabel = nyTime(Number(cutoffTime));
+  } else if (hasSignalTime) {
+    signalAsOfTimeLabel = timeStr;
+  } else {
+    signalAsOfTimeLabel = "N/A";
+  }
+  const title = document.getElementById('signal-metrics-title');
+  if (title) {
+    title.textContent = `Metrics (as of ${signalAsOfTimeLabel})`;
+  }
+}
+
 function applySignalLivePayload(data) {
   const candles = Array.isArray(data?.candles) ? data.candles : [];
   if (!candles.length) return false;
@@ -1942,6 +1970,25 @@ function applySignalLivePayload(data) {
   }
   applySignalRevealData(Math.min(visibleBefore, signalRevealCandles.length));
   return false;
+}
+
+async function fetchSignalLatestCandleOnce() {
+  if (signalLiveStepPolling) return false;
+  signalLiveStepPolling = true;
+  try {
+    const { data } = await axios.get('/api/candles', { params: { ticker, timeframe: '1m', date } });
+    const advanced = applySignalLivePayload(data || {});
+    if (!advanced) {
+      setSignalLiveStatus(`Waiting for ${signalNextLiveTimeLabel()}...`, isSignalDataSessionOpen() ? "live" : "");
+    }
+    return advanced;
+  } catch (err) {
+    console.warn('[signalNextCandle] fetch failed', err?.response?.data || err.message);
+    setSignalLiveStatus("Next candle fetch failed.", "error");
+    return false;
+  } finally {
+    signalLiveStepPolling = false;
+  }
 }
 
 async function pollSignalLiveStep() {
@@ -1973,7 +2020,7 @@ function toggleSignalLiveStep() {
     return;
   }
   if (!signalStepModeEnabled || !signalRevealCandles.length) {
-    setSignalLiveStatus("Open a timed signal chart first.", "warn");
+    setSignalLiveStatus("Open a timed or current-day signal chart first.", "warn");
     return;
   }
   if (timeframe !== "1m") {
@@ -2005,6 +2052,7 @@ function applySignalRevealData(visibleCount) {
   const nextCount = Math.max(1, Math.min(visibleCount, signalRevealCandles.length));
   signalVisibleCandles = nextCount;
   const cutoffTime = signalRevealCandles[nextCount - 1].time;
+  setSignalAsOfTime(cutoffTime);
   signalCandleSeries.setData(signalRevealCandles.slice(0, nextCount));
   signalVolumeSeries.setData(signalRevealVolume.filter(v => v.time <= cutoffTime));
   signalVwapSeries.setData(signalRevealVwap.filter(v => v.time <= cutoffTime));
@@ -2024,7 +2072,7 @@ function applySignalRevealData(visibleCount) {
 
 async function updateSignalTpoChart(cutoffTime = null) {
   const token = ++signalTpoChartRenderToken;
-  const sourceCandles = hasSignalTime && Number.isFinite(Number(cutoffTime))
+  const sourceCandles = (hasSignalTime || signalImplicitLatestMode) && Number.isFinite(Number(cutoffTime))
     ? signalTpoChartMinuteCandles.filter(c => c.time <= cutoffTime)
     : null;
   await renderTpoCharts('signal-tpo-chart-container', ticker, date, sourceCandles, () => token !== signalTpoChartRenderToken);
@@ -2036,7 +2084,8 @@ function updateSignalStepControls() {
   const liveButton = document.getElementById('signal-live-step');
   if (!controls || !button) return;
   const canShow = signalStepModeEnabled && signalRevealCandles.length > 0 && isSignalTabActive();
-  const canAdvance = canShow && signalVisibleCandles < signalRevealCandles.length;
+  const canPollForNext = signalImplicitLatestMode && isSignalDataSessionOpen() && timeframe === "1m";
+  const canAdvance = canShow && (signalVisibleCandles < signalRevealCandles.length || canPollForNext);
   controls.classList.toggle('is-visible', canShow);
   button.disabled = !canAdvance;
   if (liveButton) {
@@ -2047,12 +2096,18 @@ function updateSignalStepControls() {
   if (!canShow && signalLiveStepEnabled) {
     stopSignalLiveStep("Live Step unavailable.");
   }
+  updateSignalLiveCountdown();
 }
 
-function advanceSignalCandle() {
+async function advanceSignalCandle() {
   if (!signalStepModeEnabled || !isSignalTabActive()) return;
-  if (signalVisibleCandles >= signalRevealCandles.length) return;
-  applySignalRevealData(signalVisibleCandles + 1);
+  if (signalVisibleCandles < signalRevealCandles.length) {
+    applySignalRevealData(signalVisibleCandles + 1);
+    return;
+  }
+  if (signalImplicitLatestMode && isSignalDataSessionOpen() && timeframe === "1m") {
+    await fetchSignalLatestCandleOnce();
+  }
 }
 
 function setupSignalKeyNavigation() {
@@ -2060,7 +2115,7 @@ function setupSignalKeyNavigation() {
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'ArrowRight') return;
     if (!signalStepModeEnabled || !isSignalTabActive() || hasTypingFocus()) return;
-    if (signalVisibleCandles >= signalRevealCandles.length) return;
+    if (signalVisibleCandles >= signalRevealCandles.length && !(signalImplicitLatestMode && isSignalDataSessionOpen() && timeframe === "1m")) return;
     e.preventDefault();
     advanceSignalCandle();
   });
@@ -2360,7 +2415,7 @@ function signalMetricColumns() {
 function buildSignalMetricsRow(metrics = {}, overrides = {}) {
   return {
     ticker,
-    time: hasSignalTime ? timeStr : "N/A",
+    time: signalAsOfTimeLabel || (hasSignalTime ? timeStr : "N/A"),
     signal: signal.toUpperCase(),
     market_cap: overrides.market_cap || '',
     'float': overrides.float || '',
@@ -2561,6 +2616,8 @@ function applySignalChartPayload(data) {
   signalTpoChartMinuteCandles = tpoChartMinCandles.map(c => ({ ...c }));
   signalVisibleCandles = 0;
   signalMarker = null;
+  signalImplicitLatestMode = false;
+  setSignalAsOfTime(hasSignalTime && timeStr ? combineDateAndTime(date, timeStr) / 1000 : null);
   updateSignalStepControls();
   updateVwapSlopePanel('signal-vwap-slope-panel', plottedVwap, slopeCandles);
   updateCciPanel('signal-cci-panel', plottedCci, null, signal);
@@ -2593,8 +2650,27 @@ function applySignalChartPayload(data) {
       signalRevealSlopeCandles = slopeCandles;
       applySignalRevealData(initialCount);
     }
+  } else if (date === currentNyDateString() && plottedCandles.length > 0) {
+    signalCandleSeries.setMarkers([]);
+    let latestCount = completedSignalCandleCount(plottedCandles);
+    if (latestCount < 1) latestCount = plottedCandles.length;
+    latestCount = Math.min(latestCount, plottedCandles.length);
+    signalStepModeEnabled = true;
+    signalImplicitLatestMode = true;
+    signalRevealCandles = plottedCandles;
+    signalRevealVolume = plottedVolume;
+    signalRevealVwap = plottedVwap;
+    signalRevealSma = plottedSma;
+    signalRevealCci = plottedCci;
+    signalRevealSlopeCandles = slopeCandles;
+    applySignalRevealData(latestCount);
+    const cutoff = signalCurrentCutoffTime();
+    const statusTime = Number.isFinite(Number(cutoff)) ? nyTime(Number(cutoff)) : "latest candle";
+    setSignalLiveStatus(isSignalDataSessionOpen() ? `As of ${statusTime}. Waiting for ${signalNextLiveTimeLabel()}...` : `As of ${statusTime}.`);
   } else {
     signalCandleSeries.setMarkers([]);
+    const last = plottedCandles[plottedCandles.length - 1];
+    setSignalAsOfTime(last?.time ?? null);
   }
   setSessionVisibleRange(signalChart, date);
   setSessionVisibleRange(signalCciPlot.chart, date);
@@ -2645,6 +2721,12 @@ async function loadSignalExtras() {
 async function loadSignalMetrics() {
   const requestParams = { ticker, resolution: timeframe, date, includeExtras: 'false' };
   if (hasSignalTime) requestParams.time = timeStr;
+  if (!hasSignalTime && date === currentNyDateString()) {
+    const cutoff = signalCurrentCutoffTime();
+    if (Number.isFinite(Number(cutoff))) {
+      requestParams.time = nyTime(Number(cutoff)).replace(':', '');
+    }
+  }
   try {
     const { data } = await axios.get('/api/chart-data', { params: requestParams });
     const metrics = data.metrics || {};
