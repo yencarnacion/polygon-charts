@@ -949,6 +949,8 @@ let contextIntradayChart = null;
 let contextIntradayCandleSeries = null;
 let contextIntradayVolumeSeries = null;
 let contextIntradayVwapSeries = null;
+let contextIntradayDailyPivotPriceLines = [];
+let contextIntradayDailyPivotRenderToken = 0;
 let contextNews = [];
 let contextFilings = [];
 let contextKey = "";
@@ -1836,6 +1838,157 @@ async function tpoFetchMinuteCandles(ticker, dateStr) {
   return tpoChartMinuteCache[key].map(c => ({ ...c }));
 }
 
+function dailyPivotFormatPrice(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "";
+  if (Math.abs(n) < 1) return n.toFixed(4);
+  if (Math.abs(n) < 10) return n.toFixed(3);
+  return n.toFixed(2);
+}
+
+function calculateDailyPivots(sessionCandles) {
+  const candles = (Array.isArray(sessionCandles) ? sessionCandles : [])
+    .filter(c => c &&
+      Number.isFinite(Number(c.high)) &&
+      Number.isFinite(Number(c.low)) &&
+      Number.isFinite(Number(c.close)))
+    .sort((a, b) => Number(a.time) - Number(b.time));
+  if (!candles.length) return null;
+  let high = Number(candles[0].high);
+  let low = Number(candles[0].low);
+  for (const c of candles) {
+    high = Math.max(high, Number(c.high));
+    low = Math.min(low, Number(c.low));
+  }
+  const close = Number(candles[candles.length - 1].close);
+  const pp = (high + low + close) / 3;
+  return {
+    pp,
+    r1: 2 * pp - low,
+    s1: 2 * pp - high,
+    r2: pp + (high - low),
+    s2: pp - (high - low),
+    r3: high + 2 * (pp - low),
+    s3: low - 2 * (high - pp)
+  };
+}
+
+function dailyPivotLineSpecs() {
+  return [
+    { key: "r3", label: "R3", color: "#CC79A7", style: 1, width: 1 },
+    { key: "r2", label: "R2", color: "#D55E00", style: 2, width: 1 },
+    { key: "r1", label: "R1", color: "#E69F00", style: 0, width: 1 },
+    { key: "pp", label: "PP", color: "#F0E442", style: 0, width: 2 },
+    { key: "s1", label: "S1", color: "#009E73", style: 0, width: 1 },
+    { key: "s2", label: "S2", color: "#0072B2", style: 2, width: 1 },
+    { key: "s3", label: "S3", color: "#56B4E9", style: 1, width: 1 }
+  ];
+}
+
+function clearDailyPivotPriceLines(series) {
+  if (!series || !dailyPivotPriceLines.length) {
+    dailyPivotPriceLines = [];
+    return;
+  }
+  for (const line of dailyPivotPriceLines) {
+    try {
+      series.removePriceLine(line);
+    } catch (err) {
+      console.debug("[dailyPivots] unable to remove line", err?.message || err);
+    }
+  }
+  dailyPivotPriceLines = [];
+}
+
+function addDailyPivotPriceLines(series, pivots) {
+  if (!series || !pivots) return;
+  clearDailyPivotPriceLines(series);
+  dailyPivotPriceLines = dailyPivotLineSpecs()
+    .map(spec => ({ ...spec, price: Number(pivots[spec.key]) }))
+    .filter(spec => Number.isFinite(spec.price))
+    .map(spec => series.createPriceLine({
+      price: spec.price,
+      color: spec.color,
+      lineWidth: spec.width,
+      lineStyle: spec.style,
+      axisLabelVisible: true,
+      title: `${spec.label} ${dailyPivotFormatPrice(spec.price)}`
+    }));
+}
+
+async function updateDailyPivots(tickerValue, dateStr) {
+  const token = ++dailyPivotRenderToken;
+  clearDailyPivotPriceLines(candleSeries);
+  if (!candleSeries || !tickerValue || !dateStr) return;
+  try {
+    const priorDate = await tpoFetchPriorTradingDate(tickerValue, dateStr);
+    if (!priorDate || token !== dailyPivotRenderToken) return;
+    const priorCandles = await tpoFetchMinuteCandles(tickerValue, priorDate);
+    if (token !== dailyPivotRenderToken) return;
+    const rthCandles = tpoRthCandles(priorCandles);
+    const pivots = calculateDailyPivots(rthCandles);
+    if (!pivots || token !== dailyPivotRenderToken) return;
+    addDailyPivotPriceLines(candleSeries, pivots);
+  } catch (err) {
+    if (token === dailyPivotRenderToken) {
+      clearDailyPivotPriceLines(candleSeries);
+    }
+    console.warn("[dailyPivots] unavailable", err?.response?.data || err.message || err);
+  }
+}
+
+function clearContextIntradayDailyPivotPriceLines(series) {
+  if (!series || !contextIntradayDailyPivotPriceLines.length) {
+    contextIntradayDailyPivotPriceLines = [];
+    return;
+  }
+  for (const line of contextIntradayDailyPivotPriceLines) {
+    try {
+      series.removePriceLine(line);
+    } catch (err) {
+      console.debug("[contextDailyPivots] unable to remove line", err?.message || err);
+    }
+  }
+  contextIntradayDailyPivotPriceLines = [];
+}
+
+function addContextIntradayDailyPivotPriceLines(series, pivots) {
+  if (!series || !pivots) return;
+  clearContextIntradayDailyPivotPriceLines(series);
+  contextIntradayDailyPivotPriceLines = dailyPivotLineSpecs()
+    .map(spec => ({ ...spec, price: Number(pivots[spec.key]) }))
+    .filter(spec => Number.isFinite(spec.price))
+    .map(spec => series.createPriceLine({
+      price: spec.price,
+      color: spec.color,
+      lineWidth: spec.width,
+      lineStyle: spec.style,
+      axisLabelVisible: true,
+      title: `${spec.label} ${dailyPivotFormatPrice(spec.price)}`
+    }));
+}
+
+async function updateContextIntradayDailyPivots(tickerValue, dateStr) {
+  const token = ++contextIntradayDailyPivotRenderToken;
+  clearContextIntradayDailyPivotPriceLines(contextIntradayCandleSeries);
+  if (!contextIntradayCandleSeries || !tickerValue || !dateStr) return;
+  try {
+    const priorDate = await tpoFetchPriorTradingDate(tickerValue, dateStr);
+    if (!priorDate || token !== contextIntradayDailyPivotRenderToken) return;
+    const priorCandles = await tpoFetchMinuteCandles(tickerValue, priorDate);
+    if (token !== contextIntradayDailyPivotRenderToken) return;
+    const rthCandles = tpoRthCandles(priorCandles);
+    const pivots = calculateDailyPivots(rthCandles);
+    if (!pivots || token !== contextIntradayDailyPivotRenderToken) return;
+    addContextIntradayDailyPivotPriceLines(contextIntradayCandleSeries, pivots);
+  } catch (err) {
+    if (token === contextIntradayDailyPivotRenderToken) {
+      clearContextIntradayDailyPivotPriceLines(contextIntradayCandleSeries);
+    }
+    console.warn("[contextDailyPivots] unavailable", err?.response?.data || err.message || err);
+  }
+}
+
 function tpoRenderEvolution(evolution) {
   if (!evolution.length) return "";
   const last = evolution.length - 1;
@@ -2490,6 +2643,7 @@ async function loadContextTab(forceReload = false) {
       contextIntradayChart.resize(document.getElementById('context-intraday-chart').clientWidth, 600);
       setSessionVisibleRange(contextIntradayChart, date);
       drawRthOpenLine(contextIntradayChart, document.getElementById('context-intraday-chart'), date);
+      updateContextIntradayDailyPivots(ticker, date);
     }
     return;
   }
@@ -2524,6 +2678,7 @@ async function loadContextTab(forceReload = false) {
     contextIntradayVwapSeries.setData(buildContextIntradayVwap(intradayCandles, intradayVolume, intraday.vwap || []));
     setSessionVisibleRange(contextIntradayChart, date);
     drawRthOpenLine(contextIntradayChart, document.getElementById('context-intraday-chart'), date);
+    updateContextIntradayDailyPivots(ticker, date);
     renderContextExtra(contextResp.data || {});
 
     contextLoaded = true;
@@ -2614,6 +2769,8 @@ let cachedVwap = [];
 let cachedSma = [];
 let cachedCci = [];
 let cachedTpoCandles = [];
+let dailyPivotPriceLines = [];
+let dailyPivotRenderToken = 0;
 let mainStepModeEnabled = false;
 let mainStepStarted = false;
 let mainStepVisibleCandles = 0;
@@ -2758,6 +2915,7 @@ async function load(e, skipDefaultRow = false){
     setSessionVisibleRange(chart, date);
     setSessionVisibleRange(cciPlot.chart, date);
     drawRthOpenLine(chart, document.getElementById('chart'), date);
+    updateDailyPivots(ticker, date);
     renderTpoCharts('tpo-chart-container', ticker, date, tpoChartCandles);
     disarmMainStep("Select a signal time to arm replay.");
     if (watchlistMode) {
