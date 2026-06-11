@@ -274,6 +274,12 @@
     .main-gap-indicator.is-up { border-left-color: var(--positive); }
     .main-gap-indicator.is-down { border-left-color: var(--negative); }
     .main-gap-indicator.is-flat { border-left-color: var(--neutral); }
+    .main-gap-indicator.is-up .main-gap-state,
+    .main-gap-indicator.is-up .main-gap-value { color: var(--positive); }
+    .main-gap-indicator.is-down .main-gap-state,
+    .main-gap-indicator.is-down .main-gap-value { color: var(--negative); }
+    .main-gap-indicator.is-flat .main-gap-state,
+    .main-gap-indicator.is-flat .main-gap-value { color: var(--muted); }
     .main-gap-label {
       grid-column: 1 / -1;
       color: var(--muted);
@@ -1111,6 +1117,11 @@
           <span id="main-gap-state" class="main-gap-state">Waiting</span>
           <span id="main-gap-value" class="main-gap-value">--</span>
         </div>
+        <div id="main-price-change-indicator" class="main-gap-indicator is-flat" aria-live="polite">
+          <span class="main-gap-label">Change From Prev 4PM Close</span>
+          <span id="main-price-change-state" class="main-gap-state">Waiting</span>
+          <span id="main-price-change-value" class="main-gap-value">--</span>
+        </div>
         <div id="main-chart-counter" class="main-chart-counter">0/0</div>
         <div id="main-step-controls" class="main-step-controls">
           <button id="main-next-candle" class="btn btn-primary" type="button" disabled>Next candle</button>
@@ -1737,13 +1748,15 @@ function applyMainStepData(visibleCount) {
   mainStepVisibleCandles = nextCount;
   mainStepStarted = true;
   const cutoffTime = cachedCandles[nextCount - 1].time;
-  candleSeries.setData(cachedCandles.slice(0, nextCount));
+  const shownCandles = cachedCandles.slice(0, nextCount);
+  candleSeries.setData(shownCandles);
   volumeSeries.setData(cachedVolume.filter(v => v.time <= cutoffTime));
   vwapSeries.setData(cachedVwap.filter(v => v.time <= cutoffTime));
   smaSeries.setData(cachedSma.filter(v => v.time <= cutoffTime));
   cciPlot.line.setData(cachedCci.filter(v => v.time <= cutoffTime));
   updateVwapSlopePanel("vwap-slope-panel", cachedVwap, cachedMinCandles, cutoffTime);
   updateCciPanel("cci-panel", cachedCci, cutoffTime, mainStepSignalSide);
+  updatePriceChangeIndicator(mainStepTicker, mainStepDate, shownCandles);
   if (cachedTpoCandles.length) {
     renderTpoCharts("tpo-chart-container", mainStepTicker, mainStepDate, cachedTpoCandles.filter(c => c.time <= cutoffTime));
   }
@@ -3237,6 +3250,34 @@ function updateGapIndicator(ticker, dateStr) {
   setPreviousCloseLine(priorClose);
 }
 
+function updatePriceChangeIndicator(ticker, dateStr, shownCandles = cachedCandles) {
+  const panel = document.getElementById("main-price-change-indicator");
+  const stateEl = document.getElementById("main-price-change-state");
+  const valueEl = document.getElementById("main-price-change-value");
+  if (!panel || !stateEl || !valueEl) return;
+  panel.classList.remove("is-up", "is-down", "is-flat");
+  const priorClose = Number(getPriorClose(ticker, dateStr));
+  const candles = (Array.isArray(shownCandles) ? shownCandles : [])
+    .filter(c => c && Number.isFinite(Number(c.close)));
+  const latestCandle = candles[candles.length - 1];
+  const latestClose = Number(latestCandle?.close);
+  if (!Number.isFinite(priorClose) || priorClose <= 0 || !Number.isFinite(latestClose)) {
+    panel.classList.add("is-flat");
+    stateEl.textContent = "Waiting";
+    valueEl.textContent = "--";
+    valueEl.removeAttribute("title");
+    return;
+  }
+  const diff = latestClose - priorClose;
+  const pct = (diff / priorClose) * 100;
+  const direction = Math.abs(pct) < 0.05 ? "flat" : (pct > 0 ? "up" : "down");
+  const timeLabel = Number.isFinite(Number(latestCandle?.time)) ? ` at ${nyTime(latestCandle.time)}` : "";
+  panel.classList.add(`is-${direction}`);
+  stateEl.textContent = direction === "flat" ? "Flat" : direction[0].toUpperCase() + direction.slice(1);
+  valueEl.textContent = `${formatGapPercent(pct)} / ${formatGapDollars(diff)}`;
+  valueEl.title = `Close${timeLabel} ${dailyPivotFormatPrice(latestClose)} vs previous 4PM close ${dailyPivotFormatPrice(priorClose)}`;
+}
+
 /* ─── Load candles with debug logging ────────────────────── */
 async function load(e, skipDefaultRow = false){
   if(e) e.preventDefault();
@@ -3273,7 +3314,8 @@ async function load(e, skipDefaultRow = false){
       candleSeries.setMarkers([]);
       updateVwapSlopePanel("vwap-slope-panel", [], []);
       updateCciPanel("cci-panel", []);
-      clearPreviousCloseLine();
+      updateGapIndicator(ticker, date);
+      updatePriceChangeIndicator(ticker, date, []);
       clearDailyPivotPriceLines(candleSeries);
       renderTpoCharts('tpo-chart-container', ticker, date, []);
       disarmMainStep("No RTH data for this chart.");
@@ -3385,6 +3427,7 @@ async function load(e, skipDefaultRow = false){
     updateCciPanel("cci-panel", cachedCci);
     candleSeries.setMarkers([]);
     updateGapIndicator(ticker, date);
+    updatePriceChangeIndicator(ticker, date, data.candles);
     setSessionVisibleRange(chart, date);
     setSessionVisibleRange(cciPlot.chart, date);
     drawRthOpenLine(chart, document.getElementById('chart'), date);
