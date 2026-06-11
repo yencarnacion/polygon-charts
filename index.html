@@ -1350,6 +1350,13 @@ function updateOpenChartLink(tickerOverride = "") {
   textEl.value = url;
 }
 
+function isCurrentMainChart(ticker, date) {
+  const currentTicker = String(document.getElementById("ticker")?.value || "").trim().toUpperCase();
+  const currentDate = String(document.getElementById("tradeDate")?.value || "").trim();
+  return currentTicker === String(ticker || "").trim().toUpperCase() &&
+    currentDate === String(date || "").trim();
+}
+
 const companyNameCache = {};
 
 function updateMainChartIdentity(ticker, companyName = "") {
@@ -2820,11 +2827,28 @@ async function displayMarketRadar(ticker, date) {
   }
   try {
     const { data } = await axios.get("/api/market-stats", { params: { ticker, date } });
+    if (!isCurrentMainChart(ticker, date)) return;
     renderMarketRadar(data);
   } catch (err) {
     console.warn("[marketRadar] unavailable", err?.response?.data || err.message);
-    renderMarketRadarUnavailable("Market Stats unavailable");
+    if (isCurrentMainChart(ticker, date)) {
+      renderMarketRadarUnavailable("Market Stats unavailable");
+    }
   }
+}
+
+function refreshNonChartPanels(ticker, date, options = {}) {
+  const pending = [displayExtra(ticker, date)];
+  if (marketauxEnabled) {
+    pending.push(displayMarketRadar(ticker, date));
+  }
+  const work = Promise.all(pending).catch(err => {
+    console.warn("[nonChartPanels] background refresh failed", err?.message || err);
+  });
+  if (options.defer) {
+    return Promise.resolve();
+  }
+  return work;
 }
 
 function initContextCharts() {
@@ -3447,11 +3471,7 @@ async function load(e, skipDefaultRow = false){
         renderMarketRadarUnavailable("Hidden in watchlist mode for speed");
       }
     } else {
-      const pending = [displayExtra(ticker, date)];
-      if (marketauxEnabled) {
-        pending.push(displayMarketRadar(ticker, date));
-      }
-      await Promise.all(pending);
+      await refreshNonChartPanels(ticker, date, { defer: csvSlideshowActive || navInFlight });
     }
     if (csvData.length === 1 && csvData[0].ticker.toUpperCase() !== ticker.toUpperCase() && !isCsvUploaded) {
       csvData = [];
@@ -3493,7 +3513,12 @@ async function load(e, skipDefaultRow = false){
       });
     }
     if (contextTabActive && !watchlistMode) {
-      await loadContextTab(true);
+      const contextLoad = loadContextTab(true);
+      if (csvSlideshowActive || navInFlight) {
+        contextLoad.catch(err => console.warn("[context] background load failed", err?.message || err));
+      } else {
+        await contextLoad;
+      }
     }
   }catch(err){
     if (isNetworkError(err)) {
@@ -3989,6 +4014,17 @@ async function calculateMetricsForRow(row){
   }
 }
 
+function updateRowMetrics(row, options = {}) {
+  if (watchlistMode) return Promise.resolve();
+  const work = calculateMetricsForRow(row)
+    .then(() => table.updateData([row]))
+    .catch(err => console.warn("[metrics] row enrichment failed", err?.message || err));
+  if (options.defer) {
+    return Promise.resolve();
+  }
+  return work;
+}
+
 async function loadCsvText(text, sourceName = "CSV", options = {}) {
   if (csvSlideshowActive) stopCsvSlideshow("Slideshow stopped while loading a new CSV.");
   const dateInput = document.getElementById('tradeDate');
@@ -4399,8 +4435,7 @@ async function showSignalOnChart(row){
     return;
   }
   if (!watchlistMode) {
-    await calculateMetricsForRow(row); // enrich row metrics (async)
-    table.updateData([row]); // show updates in grid
+    await updateRowMetrics(row, { defer: csvSlideshowActive || navInFlight });
   }
   updateOpenChartLink(nextTicker);
   const hhmm = normalizeHHMMValue(row.time) || "0930";
@@ -4436,6 +4471,7 @@ document.getElementById('downloadCsv').onclick=()=>{
 async function displayExtra(ticker, date) {
   try {
     const {data} = await axios.get('/api/extra', {params: {ticker, date, days: 2}});
+    if (!isCurrentMainChart(ticker, date)) return;
     const newsItems = data.news || [];
     currentNews = newsItems;
     new Tabulator("#news-sheet", {
