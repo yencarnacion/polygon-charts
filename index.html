@@ -920,6 +920,81 @@
     .csv-local-picker select {
       max-width: 320px;
     }
+    .csv-slideshow-options {
+      display: none;
+      align-items: center;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+      padding: 0.4rem 0.55rem;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: rgba(7, 14, 24, 0.28);
+    }
+    .csv-slideshow-options.is-visible {
+      display: inline-flex;
+    }
+    .csv-slideshow-options label {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
+    .csv-slideshow-options input {
+      width: 86px;
+    }
+    #csvSlideshowBtn.is-active,
+    #csvSlideshowStart.is-active {
+      background: var(--positive);
+      border-color: var(--positive);
+      color: #061322;
+      font-weight: 700;
+    }
+    .csv-slideshow-stop-bar {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      z-index: 9999;
+      display: none;
+      padding: 0.75rem 1rem calc(0.75rem + env(safe-area-inset-bottom, 0px));
+      background: rgba(7, 14, 24, 0.94);
+      border-top: 1px solid var(--border);
+      box-shadow: 0 -12px 30px rgba(0, 0, 0, 0.35);
+    }
+    .csv-slideshow-stop-bar.is-visible {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.75rem;
+    }
+    .csv-slideshow-stop-bar button {
+      min-width: min(320px, 90vw);
+      min-height: 48px;
+      font-weight: 700;
+    }
+    .csv-slideshow-stop-status {
+      color: var(--muted);
+      font-size: 0.9rem;
+      font-variant-numeric: tabular-nums;
+    }
+    @media (max-width: 760px) {
+      .csv-slideshow-options {
+        width: 100%;
+      }
+      .csv-slideshow-options input,
+      .csv-slideshow-options button {
+        min-height: 42px;
+      }
+      body.csv-slideshow-running {
+        padding-bottom: 86px;
+      }
+      .csv-slideshow-stop-bar.is-visible {
+        flex-direction: column;
+        align-items: stretch;
+      }
+      .csv-slideshow-stop-status {
+        text-align: center;
+      }
+    }
   </style>
 </head>
 <body>
@@ -974,6 +1049,13 @@
         <button id="addColumn" class="btn btn-outline-success btn-sm">Add Column</button>
         <button id="prevRow" class="btn btn-outline-light btn-sm">▲ Prev</button>
         <button id="nextRow" class="btn btn-outline-light btn-sm">▼ Next</button>
+        <button id="csvSlideshowBtn" class="btn btn-outline-info btn-sm d-none" type="button">Slideshow</button>
+        <div id="csvSlideshowOptions" class="csv-slideshow-options" aria-live="polite">
+          <label for="csvSlideshowSeconds">Seconds per chart</label>
+          <input id="csvSlideshowSeconds" type="number" min="1" step="1" value="30" class="form-control form-control-sm">
+          <button id="csvSlideshowStart" class="btn btn-info btn-sm" type="button">Start</button>
+          <button id="csvSlideshowStopInline" class="btn btn-outline-light btn-sm d-none" type="button">Stop</button>
+        </div>
         <input id="jumpToChart" type="number" min="1" step="1" class="form-control form-control-sm" placeholder="Chart #" style="max-width:110px">
         <button id="jumpToChartBtn" class="btn btn-outline-light btn-sm">Go #</button>
         <button id="toggleSignal" class="btn btn-outline-light btn-sm">Toggle Signal</button>
@@ -1098,6 +1180,10 @@
       <div id="context-profile-container"></div>
     </div>
   </div>
+</div>
+<div id="csvSlideshowStopBar" class="csv-slideshow-stop-bar" aria-live="polite">
+  <button id="csvSlideshowStopBarButton" class="btn btn-danger" type="button">Stop Slideshow</button>
+  <span id="csvSlideshowStopStatus" class="csv-slideshow-stop-status"></span>
 </div>
 <!-- Libraries -->
 <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
@@ -3432,6 +3518,155 @@ const NEW_COLUMNS=[
   'percent_gain_eod','max_spiking_up_percent','max_spiking_down_percent',
   'volume','percent_gap_from_prior', 'prior_day_volume', 'pre_market_volume'];
 
+let csvSlideshowActive = false;
+let csvSlideshowOptionsOpen = false;
+let csvSlideshowTimer = null;
+let csvSlideshowCountdownTimer = null;
+let csvSlideshowIntervalSeconds = 30;
+let csvSlideshowNextAt = 0;
+
+function csvSlideshowElements() {
+  return {
+    button: document.getElementById("csvSlideshowBtn"),
+    options: document.getElementById("csvSlideshowOptions"),
+    seconds: document.getElementById("csvSlideshowSeconds"),
+    start: document.getElementById("csvSlideshowStart"),
+    stopInline: document.getElementById("csvSlideshowStopInline"),
+    stopBar: document.getElementById("csvSlideshowStopBar"),
+    stopBarButton: document.getElementById("csvSlideshowStopBarButton"),
+    stopStatus: document.getElementById("csvSlideshowStopStatus")
+  };
+}
+
+function canUseCsvSlideshow() {
+  return isCsvUploaded && csvData.length > 0;
+}
+
+function getCsvSlideshowSeconds() {
+  const { seconds } = csvSlideshowElements();
+  const raw = Number(seconds?.value || csvSlideshowIntervalSeconds || 30);
+  const value = Number.isFinite(raw) ? Math.max(1, Math.round(raw)) : 30;
+  if (seconds) seconds.value = String(value);
+  return value;
+}
+
+function csvSlideshowRemainingSeconds() {
+  if (!csvSlideshowActive || !csvSlideshowNextAt) return 0;
+  return Math.max(0, Math.ceil((csvSlideshowNextAt - Date.now()) / 1000));
+}
+
+function updateCsvSlideshowUi() {
+  const { button, options, start, stopInline, stopBar, stopBarButton, stopStatus } = csvSlideshowElements();
+  const canUse = canUseCsvSlideshow();
+  const remaining = csvSlideshowRemainingSeconds();
+  const stopLabel = csvSlideshowActive
+    ? (remaining > 0 ? `Stop Slideshow (${remaining}s)` : "Stop Slideshow (loading)")
+    : "Stop Slideshow";
+  if (button) {
+    button.classList.toggle("d-none", !canUse);
+    button.classList.toggle("is-active", csvSlideshowActive);
+    button.disabled = !canUse;
+    button.textContent = csvSlideshowActive ? "Slideshow On" : "Slideshow";
+  }
+  if (options) {
+    options.classList.toggle("is-visible", canUse && (csvSlideshowOptionsOpen || csvSlideshowActive));
+  }
+  if (start) {
+    start.classList.toggle("is-active", csvSlideshowActive);
+    start.textContent = csvSlideshowActive ? "Restart" : "Start";
+  }
+  if (stopInline) {
+    stopInline.classList.toggle("d-none", !csvSlideshowActive);
+    stopInline.textContent = stopLabel;
+  }
+  if (stopBar) {
+    stopBar.classList.toggle("is-visible", csvSlideshowActive);
+  }
+  if (stopBarButton) {
+    stopBarButton.textContent = stopLabel;
+  }
+  if (stopStatus) {
+    stopStatus.textContent = csvSlideshowActive && csvData.length
+      ? `Chart ${currentRow + 1} of ${csvData.length} • ${csvSlideshowIntervalSeconds}s`
+      : "";
+  }
+  document.body.classList.toggle("csv-slideshow-running", csvSlideshowActive);
+}
+
+function stopCsvSlideshow(message = "") {
+  if (csvSlideshowTimer) {
+    clearTimeout(csvSlideshowTimer);
+    csvSlideshowTimer = null;
+  }
+  if (csvSlideshowCountdownTimer) {
+    clearInterval(csvSlideshowCountdownTimer);
+    csvSlideshowCountdownTimer = null;
+  }
+  csvSlideshowNextAt = 0;
+  const wasActive = csvSlideshowActive;
+  csvSlideshowActive = false;
+  updateCsvSlideshowUi();
+  if (message || wasActive) {
+    setWatchlistStatus(message || "Slideshow stopped.");
+  }
+}
+
+function scheduleCsvSlideshow() {
+  if (csvSlideshowTimer) {
+    clearTimeout(csvSlideshowTimer);
+    csvSlideshowTimer = null;
+  }
+  if (csvSlideshowCountdownTimer) {
+    clearInterval(csvSlideshowCountdownTimer);
+    csvSlideshowCountdownTimer = null;
+  }
+  csvSlideshowNextAt = 0;
+  if (!csvSlideshowActive) return;
+  if (!canUseCsvSlideshow()) {
+    stopCsvSlideshow("Slideshow stopped because no CSV chart is loaded.");
+    return;
+  }
+  csvSlideshowNextAt = Date.now() + csvSlideshowIntervalSeconds * 1000;
+  updateCsvSlideshowUi();
+  csvSlideshowCountdownTimer = setInterval(updateCsvSlideshowUi, 1000);
+  csvSlideshowTimer = setTimeout(() => {
+    csvSlideshowTimer = null;
+    if (csvSlideshowCountdownTimer) {
+      clearInterval(csvSlideshowCountdownTimer);
+      csvSlideshowCountdownTimer = null;
+    }
+    csvSlideshowNextAt = 0;
+    updateCsvSlideshowUi();
+    if (!csvSlideshowActive) return;
+    const advanced = showNextRow();
+    if (!advanced || !navInFlight) {
+      scheduleCsvSlideshow();
+    }
+  }, csvSlideshowIntervalSeconds * 1000);
+}
+
+function startCsvSlideshow() {
+  if (!canUseCsvSlideshow()) {
+    setWatchlistStatus("Load a CSV before starting slideshow.", true);
+    return;
+  }
+  csvSlideshowIntervalSeconds = getCsvSlideshowSeconds();
+  csvSlideshowActive = true;
+  csvSlideshowOptionsOpen = true;
+  updateCsvSlideshowUi();
+  setWatchlistStatus(`Slideshow running every ${csvSlideshowIntervalSeconds} seconds.`);
+  scheduleCsvSlideshow();
+}
+
+function toggleCsvSlideshowOptions() {
+  if (!canUseCsvSlideshow()) {
+    setWatchlistStatus("Load a CSV before starting slideshow.", true);
+    return;
+  }
+  csvSlideshowOptionsOpen = !csvSlideshowOptionsOpen;
+  updateCsvSlideshowUi();
+}
+
 function metricColumnTitle(field) {
   switch (field) {
     case 'percent_gain_eod':
@@ -3454,6 +3689,11 @@ function updateTableView(){
   if (!csvData.length) {
     document.getElementById('row-indicator').textContent = '0/0';
     updateMainChartCounter();
+    if (csvSlideshowActive) {
+      stopCsvSlideshow("Slideshow stopped because no CSV chart is loaded.");
+    } else {
+      updateCsvSlideshowUi();
+    }
     const jumpInput = document.getElementById("jumpToChart");
     if (jumpInput) {
       jumpInput.value = "";
@@ -3475,6 +3715,7 @@ function updateTableView(){
     jumpInput.max = String(csvData.length);
     jumpInput.value = String(currentRow + 1);
   }
+  updateCsvSlideshowUi();
 }
 
 /* ─── Tooltip only for truncated cell values ──────────────── */
@@ -3540,6 +3781,7 @@ function parseWatchlistSymbols(rawYaml) {
 }
 
 async function loadWatchlistYaml() {
+  if (csvSlideshowActive) stopCsvSlideshow("Slideshow stopped while loading a new list.");
   const file = document.getElementById("watchlistFile").files[0];
   const date = document.getElementById("tradeDate").value;
   if (!file) {
@@ -3705,6 +3947,7 @@ async function calculateMetricsForRow(row){
 }
 
 async function loadCsvText(text, sourceName = "CSV", options = {}) {
+  if (csvSlideshowActive) stopCsvSlideshow("Slideshow stopped while loading a new CSV.");
   const dateInput = document.getElementById('tradeDate');
   const timeframeInput = document.getElementById('timeframe');
   const preservedDate = options.selectedDate || selectedTradeDate || dateInput.value;
@@ -3908,6 +4151,9 @@ async function processRowNavigationQueue() {
     }
   } finally {
     navInFlight = false;
+    if (csvSlideshowActive) {
+      scheduleCsvSlideshow();
+    }
   }
 }
 
@@ -3937,6 +4183,16 @@ document.getElementById('prevRow').onclick=()=>{
 document.getElementById('nextRow').onclick=()=>{
   showNextRow();
 };
+document.getElementById('csvSlideshowBtn').addEventListener('click', toggleCsvSlideshowOptions);
+document.getElementById('csvSlideshowStart').addEventListener('click', startCsvSlideshow);
+document.getElementById('csvSlideshowStopInline').addEventListener('click', () => stopCsvSlideshow());
+document.getElementById('csvSlideshowStopBarButton').addEventListener('click', () => stopCsvSlideshow());
+document.getElementById('csvSlideshowSeconds').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    startCsvSlideshow();
+  }
+});
 document.getElementById('jumpToChartBtn').onclick=()=>{
   jumpToChartNumber();
 };
