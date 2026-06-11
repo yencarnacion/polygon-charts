@@ -1560,23 +1560,37 @@ func openChartHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func cycleCSVHandler(w http.ResponseWriter, r *http.Request) {
-	name := "polygon-charts-routine.csv"
+	name := filepath.Join("csv", "polygon-charts-routine.csv")
 	if _, err := os.Stat(name); err != nil {
 		if !os.IsNotExist(err) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		matches, err := filepath.Glob("polygon_charts_cycle_symbols_*.csv")
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
+		name = "polygon-charts-routine.csv"
+		if _, rootErr := os.Stat(name); rootErr != nil {
+			if !os.IsNotExist(rootErr) {
+				http.Error(w, rootErr.Error(), http.StatusInternalServerError)
+				return
+			}
+			matches, err := filepath.Glob(filepath.Join("csv", "polygon_charts_cycle_symbols_*.csv"))
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			if len(matches) == 0 {
+				matches, err = filepath.Glob("polygon_charts_cycle_symbols_*.csv")
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+			}
+			if len(matches) == 0 {
+				http.Error(w, "no polygon-charts-routine.csv or polygon_charts_cycle_symbols_*.csv file found", http.StatusNotFound)
+				return
+			}
+			sort.Strings(matches)
+			name = matches[len(matches)-1]
 		}
-		if len(matches) == 0 {
-			http.Error(w, "no polygon-charts-routine.csv or polygon_charts_cycle_symbols_*.csv file found", http.StatusNotFound)
-			return
-		}
-		sort.Strings(matches)
-		name = matches[len(matches)-1]
 	}
 	data, err := os.ReadFile(name)
 	if err != nil {
@@ -1585,6 +1599,75 @@ func cycleCSVHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 	w.Header().Set("X-Cycle-Csv-Filename", filepath.Base(name))
+	_, _ = w.Write(data)
+}
+
+type localCSVFile struct {
+	Name     string `json:"name"`
+	Size     int64  `json:"size"`
+	Modified string `json:"modified"`
+}
+
+func listLocalCSVsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	entries, err := os.ReadDir("csv")
+	if err != nil {
+		if os.IsNotExist(err) {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string][]localCSVFile{"files": []localCSVFile{}})
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	files := make([]localCSVFile, 0)
+	for _, entry := range entries {
+		if entry.IsDir() || strings.ToLower(filepath.Ext(entry.Name())) != ".csv" {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		files = append(files, localCSVFile{
+			Name:     entry.Name(),
+			Size:     info.Size(),
+			Modified: info.ModTime().Format(time.RFC3339),
+		})
+	}
+	sort.Slice(files, func(i, j int) bool {
+		return files[i].Name < files[j].Name
+	})
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string][]localCSVFile{"files": files})
+}
+
+func localCSVHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	name := strings.TrimSpace(r.URL.Query().Get("name"))
+	if name == "" || filepath.Base(name) != name || strings.ToLower(filepath.Ext(name)) != ".csv" {
+		http.Error(w, "invalid csv filename", http.StatusBadRequest)
+		return
+	}
+	path := filepath.Join("csv", name)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			http.Error(w, "csv file not found", http.StatusNotFound)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("X-Local-Csv-Filename", filepath.Base(name))
 	_, _ = w.Write(data)
 }
 
@@ -2675,6 +2758,8 @@ func main() {
 	http.HandleFunc("/api/open-chart", openChartHandler)
 	http.HandleFunc("/api/open-chart/", openChartHandler)
 	http.HandleFunc("/api/cycle-csv", cycleCSVHandler)
+	http.HandleFunc("/api/local-csvs", listLocalCSVsHandler)
+	http.HandleFunc("/api/local-csv", localCSVHandler)
 	http.HandleFunc("/api/chart-data", chartDataHandler)
 	http.HandleFunc("/api/ntfy/publish", ntfyPublishHandler)
 	addr := fmt.Sprintf(":%d", listenPort)

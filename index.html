@@ -910,6 +910,16 @@
       color: var(--muted);
       font-size: 0.85rem;
     }
+    .csv-load-options,
+    .csv-local-picker {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+    .csv-local-picker select {
+      max-width: 320px;
+    }
   </style>
 </head>
 <body>
@@ -949,7 +959,16 @@
         <span id="watchlistStatus" class="ms-auto"></span>
       </div>
       <div class="d-flex align-items-center gap-2 flex-wrap mt-3">
-        <input id="csvFile" type="file" accept=".csv,text/csv" class="form-control" style="max-width:260px">
+        <input id="csvFile" type="file" accept=".csv,text/csv" class="d-none">
+        <button id="loadCsvMenu" class="btn btn-outline-light btn-sm" type="button">Load CSV</button>
+        <div id="csvLoadOptions" class="csv-load-options d-none">
+          <button id="chooseCsvUpload" class="btn btn-outline-light btn-sm" type="button">Upload CSV</button>
+          <button id="showLocalCsv" class="btn btn-outline-info btn-sm" type="button">Cloud CSV</button>
+        </div>
+        <div id="localCsvControls" class="csv-local-picker d-none">
+          <select id="localCsvSelect" class="form-select form-select-sm" aria-label="Local CSV files"></select>
+          <button id="loadLocalCsv" class="btn btn-info btn-sm" type="button">Open</button>
+        </div>
         <button id="loadCycleCsv" class="btn btn-outline-light btn-sm">Load Cycle CSV</button>
         <input id="newColumn" class="form-control" placeholder="New column name" style="max-width:200px">
         <button id="addColumn" class="btn btn-outline-success btn-sm">Add Column</button>
@@ -3732,13 +3751,103 @@ async function loadCsvText(text, sourceName = "CSV", options = {}) {
   await showSignalOnChart(csvData[currentRow]);
 }
 
+let localCsvFilesLoaded = false;
+
+async function refreshLocalCsvFiles(force = false) {
+  const select = document.getElementById('localCsvSelect');
+  if (!force && localCsvFilesLoaded && select.options.length) return;
+  select.disabled = true;
+  select.innerHTML = '<option value="">Loading local CSVs...</option>';
+  const resp = await fetch('/api/local-csvs');
+  const raw = await resp.text();
+  let data = {};
+  if (raw) {
+    try { data = JSON.parse(raw); } catch { data = {}; }
+  }
+  if (!resp.ok) throw new Error(raw || `HTTP ${resp.status}`);
+  const files = Array.isArray(data.files) ? data.files : [];
+  select.innerHTML = '';
+  if (!files.length) {
+    const option = document.createElement('option');
+    option.value = '';
+    option.textContent = 'No CSV files in ./csv';
+    select.appendChild(option);
+    select.disabled = true;
+    localCsvFilesLoaded = true;
+    return;
+  }
+  for (const file of files) {
+    const option = document.createElement('option');
+    option.value = file.name;
+    option.textContent = file.name;
+    select.appendChild(option);
+  }
+  select.disabled = false;
+  localCsvFilesLoaded = true;
+}
+
+async function loadLocalCsvFile(name) {
+  const resp = await fetch(`/api/local-csv?name=${encodeURIComponent(name)}`);
+  const text = await resp.text();
+  if (!resp.ok) throw new Error(text || `HTTP ${resp.status}`);
+  await loadCsvText(text, resp.headers.get('X-Local-Csv-Filename') || name);
+}
+
 /* ─── CSV upload handler ─────────────────────────────────── */
+document.getElementById('loadCsvMenu').addEventListener('click', async () => {
+  const options = document.getElementById('csvLoadOptions');
+  const willShow = options.classList.contains('d-none');
+  options.classList.toggle('d-none', !willShow);
+  if (willShow) {
+    try {
+      await refreshLocalCsvFiles();
+    } catch (err) {
+      console.error('[CSV] failed to list local CSVs', err);
+      setWatchlistStatus(`Failed to list local CSVs: ${err.message || err}`, true);
+    }
+  }
+});
+
+document.getElementById('chooseCsvUpload').addEventListener('click', () => {
+  document.getElementById('csvFile').click();
+});
+
+document.getElementById('showLocalCsv').addEventListener('click', async () => {
+  const controls = document.getElementById('localCsvControls');
+  const willShow = controls.classList.contains('d-none');
+  controls.classList.toggle('d-none', !willShow);
+  if (willShow) {
+    try {
+      await refreshLocalCsvFiles(true);
+    } catch (err) {
+      console.error('[CSV] failed to list local CSVs', err);
+      setWatchlistStatus(`Failed to list local CSVs: ${err.message || err}`, true);
+    }
+  }
+});
+
+document.getElementById('loadLocalCsv').addEventListener('click', async () => {
+  const select = document.getElementById('localCsvSelect');
+  const name = select.value;
+  if (!name) {
+    setWatchlistStatus('Select a local CSV first.', true);
+    return;
+  }
+  try {
+    await loadLocalCsvFile(name);
+  } catch (err) {
+    console.error('[CSV] failed to load local CSV', err);
+    setWatchlistStatus(`Failed to load local CSV: ${err.message || err}`, true);
+  }
+});
+
 document.getElementById('csvFile').addEventListener('change',async e=>{
   const file=e.target.files[0]; if(!file) return;
   const selectedDate = selectedTradeDate || document.getElementById('tradeDate').value;
   const selectedTimeframe = document.getElementById('timeframe').value;
   const text=await file.text();
   await loadCsvText(text, file.name, { selectedDate, selectedTimeframe });
+  e.target.value = '';
 });
 
 document.getElementById('loadCycleCsv').addEventListener('click', async () => {
@@ -3858,6 +3967,92 @@ document.addEventListener('keydown', (e) => {
     showPrevRow();
   }
 });
+
+function isCsvSwipeIgnoredTarget(target) {
+  return !!target?.closest?.('input, textarea, select, button, a, [contenteditable="true"], .tabulator-editing');
+}
+
+function setupCsvSwipeNavigation() {
+  const requiredTouches = 3;
+  let startX = 0;
+  let startY = 0;
+  let lastX = 0;
+  let lastY = 0;
+  let startTime = 0;
+  let tracking = false;
+  let verticalIntent = false;
+  let lastSwipeAt = 0;
+  const minDistance = 70;
+  const intentDistance = 18;
+  const maxDuration = 1200;
+  const cooldown = 350;
+
+  function gestureCenter(touches) {
+    let x = 0;
+    let y = 0;
+    for (let i = 0; i < touches.length; i++) {
+      x += touches[i].clientX;
+      y += touches[i].clientY;
+    }
+    return { x: x / touches.length, y: y / touches.length };
+  }
+
+  document.addEventListener('touchstart', (event) => {
+    if (!csvData.length || event.touches.length !== requiredTouches || isCsvSwipeIgnoredTarget(event.target)) {
+      tracking = false;
+      return;
+    }
+    event.preventDefault();
+    const center = gestureCenter(event.touches);
+    startX = center.x;
+    startY = center.y;
+    lastX = startX;
+    lastY = startY;
+    startTime = Date.now();
+    tracking = true;
+    verticalIntent = false;
+  }, { passive: false });
+
+  document.addEventListener('touchmove', (event) => {
+    if (!tracking || !csvData.length) return;
+    event.preventDefault();
+    if (event.touches.length !== requiredTouches) return;
+    const center = gestureCenter(event.touches);
+    const dx = center.x - startX;
+    const dy = center.y - startY;
+    lastX = center.x;
+    lastY = center.y;
+    if (!verticalIntent && Math.abs(dy) > intentDistance && Math.abs(dy) > Math.abs(dx) * 1.2) {
+      verticalIntent = true;
+    }
+  }, { passive: false });
+
+  document.addEventListener('touchend', (event) => {
+    if (!tracking || !csvData.length) {
+      tracking = false;
+      return;
+    }
+    tracking = false;
+    const dx = lastX - startX;
+    const dy = lastY - startY;
+    const elapsed = Date.now() - startTime;
+    const now = Date.now();
+    if (now - lastSwipeAt < cooldown) return;
+    if (elapsed > maxDuration || Math.abs(dy) < minDistance || Math.abs(dy) < Math.abs(dx) * 1.2) return;
+    lastSwipeAt = now;
+    if (dy < 0) {
+      showNextRow();
+    } else {
+      showPrevRow();
+    }
+  }, { passive: true });
+
+  document.addEventListener('touchcancel', () => {
+    tracking = false;
+  }, { passive: true });
+}
+
+setupCsvSwipeNavigation();
 
 /* ─── Show signal on chart ───────────────────────────────── */
 function combineDateAndTime(dateStr,HHMM){

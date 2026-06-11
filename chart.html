@@ -267,6 +267,16 @@
     .profile-container a { color: #84c6ff; text-decoration: underline; }
     .profile-container a:hover { color: #b4dbff; }
     .profile-container img { max-width: 100px; margin-bottom: 1rem; border-radius: 4px; }
+    .csv-load-options,
+    .csv-local-picker {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+    .csv-local-picker select {
+      max-width: 320px;
+    }
     .tpo-chart-shell {
       background: var(--surface);
       border: 1px solid var(--border);
@@ -1088,7 +1098,16 @@
         <div id="base-radar-intraday"></div>
       </section>
       <div class="d-flex align-items-center gap-2 flex-wrap mt-3">
-        <input id="base-csvFile" type="file" accept=".csv,text/csv" class="form-control" style="max-width:260px">
+        <input id="base-csvFile" type="file" accept=".csv,text/csv" class="d-none">
+        <button id="base-loadCsvMenu" class="btn btn-outline-light btn-sm" type="button">Load CSV</button>
+        <div id="base-csvLoadOptions" class="csv-load-options d-none">
+          <button id="base-chooseCsvUpload" class="btn btn-outline-light btn-sm" type="button">Upload CSV</button>
+          <button id="base-showLocalCsv" class="btn btn-outline-info btn-sm" type="button">Cloud CSV</button>
+        </div>
+        <div id="base-localCsvControls" class="csv-local-picker d-none">
+          <select id="base-localCsvSelect" class="form-select form-select-sm" aria-label="Local CSV files"></select>
+          <button id="base-loadLocalCsv" class="btn btn-info btn-sm" type="button">Open</button>
+        </div>
         <input id="base-newColumn" class="form-control" placeholder="New column name" style="max-width:200px">
         <button id="base-addColumn" class="btn btn-outline-success btn-sm">Add Column</button>
         <button id="base-prevRow" class="btn btn-outline-light btn-sm">▲ Prev</button>
@@ -4363,12 +4382,8 @@ async function showBaseSignalOnChart(row) {
   }
 }
 
-document.getElementById('base-form').addEventListener('submit', loadBaseChart);
-document.getElementById('base-csvFile').addEventListener('change', async e => {
+async function loadBaseCsvText(text, sourceName = "CSV") {
   baseIsCsvUploaded = true;
-  const file = e.target.files[0];
-  if (!file) return;
-  const text = await file.text();
   const p = Papa.parse(text.trim(), { header: true, skipEmptyLines: true });
   baseCsvData = p.data.map((r, i) => ({ __row: i, ...r }));
   if (!baseCsvData.length) {
@@ -4389,13 +4404,109 @@ document.getElementById('base-csvFile').addEventListener('change', async e => {
   }));
   cols.unshift({ title: "#", formatter: "rownum", hozAlign: "center", width: 40, frozen: true });
   baseTable.setColumns(cols);
-  baseTable.setData(baseCsvData).then(() => {
-    baseCurrentRow = 0;
-    console.debug('[baseCSV] loaded', baseCsvData.length, 'rows');
-    updateBaseTableView();
-    console.debug('[baseCSV] showing row', baseCurrentRow, baseCsvData[baseCurrentRow]);
-    showBaseSignalOnChart(baseCsvData[baseCurrentRow]);
-  });
+  await baseTable.setData(baseCsvData);
+  baseCurrentRow = 0;
+  console.debug('[baseCSV] loaded', baseCsvData.length, 'rows from', sourceName);
+  updateBaseTableView();
+  console.debug('[baseCSV] showing row', baseCurrentRow, baseCsvData[baseCurrentRow]);
+  await showBaseSignalOnChart(baseCsvData[baseCurrentRow]);
+}
+
+let baseLocalCsvFilesLoaded = false;
+
+async function refreshBaseLocalCsvFiles(force = false) {
+  const select = document.getElementById('base-localCsvSelect');
+  if (!force && baseLocalCsvFilesLoaded && select.options.length) return;
+  select.disabled = true;
+  select.innerHTML = '<option value="">Loading local CSVs...</option>';
+  const resp = await fetch('/api/local-csvs');
+  const raw = await resp.text();
+  let data = {};
+  if (raw) {
+    try { data = JSON.parse(raw); } catch { data = {}; }
+  }
+  if (!resp.ok) throw new Error(raw || `HTTP ${resp.status}`);
+  const files = Array.isArray(data.files) ? data.files : [];
+  select.innerHTML = '';
+  if (!files.length) {
+    const option = document.createElement('option');
+    option.value = '';
+    option.textContent = 'No CSV files in ./csv';
+    select.appendChild(option);
+    select.disabled = true;
+    baseLocalCsvFilesLoaded = true;
+    return;
+  }
+  for (const file of files) {
+    const option = document.createElement('option');
+    option.value = file.name;
+    option.textContent = file.name;
+    select.appendChild(option);
+  }
+  select.disabled = false;
+  baseLocalCsvFilesLoaded = true;
+}
+
+async function loadBaseLocalCsvFile(name) {
+  const resp = await fetch(`/api/local-csv?name=${encodeURIComponent(name)}`);
+  const text = await resp.text();
+  if (!resp.ok) throw new Error(text || `HTTP ${resp.status}`);
+  await loadBaseCsvText(text, resp.headers.get('X-Local-Csv-Filename') || name);
+}
+
+document.getElementById('base-form').addEventListener('submit', loadBaseChart);
+document.getElementById('base-loadCsvMenu').addEventListener('click', async () => {
+  const options = document.getElementById('base-csvLoadOptions');
+  const willShow = options.classList.contains('d-none');
+  options.classList.toggle('d-none', !willShow);
+  if (willShow) {
+    try {
+      await refreshBaseLocalCsvFiles();
+    } catch (err) {
+      console.error('[baseCSV] failed to list local CSVs', err);
+      alert(`Failed to list local CSVs: ${err.message || err}`);
+    }
+  }
+});
+
+document.getElementById('base-chooseCsvUpload').addEventListener('click', () => {
+  document.getElementById('base-csvFile').click();
+});
+
+document.getElementById('base-showLocalCsv').addEventListener('click', async () => {
+  const controls = document.getElementById('base-localCsvControls');
+  const willShow = controls.classList.contains('d-none');
+  controls.classList.toggle('d-none', !willShow);
+  if (willShow) {
+    try {
+      await refreshBaseLocalCsvFiles(true);
+    } catch (err) {
+      console.error('[baseCSV] failed to list local CSVs', err);
+      alert(`Failed to list local CSVs: ${err.message || err}`);
+    }
+  }
+});
+
+document.getElementById('base-loadLocalCsv').addEventListener('click', async () => {
+  const name = document.getElementById('base-localCsvSelect').value;
+  if (!name) {
+    alert('Select a local CSV first.');
+    return;
+  }
+  try {
+    await loadBaseLocalCsvFile(name);
+  } catch (err) {
+    console.error('[baseCSV] failed to load local CSV', err);
+    alert(`Failed to load local CSV: ${err.message || err}`);
+  }
+});
+
+document.getElementById('base-csvFile').addEventListener('change', async e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const text = await file.text();
+  await loadBaseCsvText(text, file.name);
+  e.target.value = '';
 });
 document.getElementById('base-addColumn').onclick = () => {
   const name = document.getElementById('base-newColumn').value.trim();
@@ -4404,22 +4515,117 @@ document.getElementById('base-addColumn').onclick = () => {
   baseTable.addColumn({ title: name, field: name, editor: "input", headerTooltip: true });
   document.getElementById('base-newColumn').value = "";
 };
+function baseShowPrevRow() {
+  if (!baseCsvData.length) return false;
+  baseCurrentRow = baseCurrentRow > 0 ? baseCurrentRow - 1 : baseCsvData.length - 1;
+  console.debug('[baseNav] prev ->', baseCurrentRow, baseCsvData[baseCurrentRow]);
+  updateBaseTableView();
+  showBaseSignalOnChart(baseCsvData[baseCurrentRow]);
+  return true;
+}
+
+function baseShowNextRow() {
+  if (!baseCsvData.length) return false;
+  baseCurrentRow = baseCurrentRow < baseCsvData.length - 1 ? baseCurrentRow + 1 : 0;
+  console.debug('[baseNav] next ->', baseCurrentRow, baseCsvData[baseCurrentRow]);
+  updateBaseTableView();
+  showBaseSignalOnChart(baseCsvData[baseCurrentRow]);
+  return true;
+}
+
 document.getElementById('base-prevRow').onclick = () => {
-  if (baseCurrentRow > 0) {
-    baseCurrentRow--;
-    console.debug('[baseNav] prev →', baseCurrentRow, baseCsvData[baseCurrentRow]);
-    updateBaseTableView();
-    showBaseSignalOnChart(baseCsvData[baseCurrentRow]);
-  }
+  baseShowPrevRow();
 };
 document.getElementById('base-nextRow').onclick = () => {
-  if (baseCurrentRow < baseCsvData.length - 1) {
-    baseCurrentRow++;
-    console.debug('[baseNav] next →', baseCurrentRow, baseCsvData[baseCurrentRow]);
-    updateBaseTableView();
-    showBaseSignalOnChart(baseCsvData[baseCurrentRow]);
-  }
+  baseShowNextRow();
 };
+
+function isBaseCsvSwipeIgnoredTarget(target) {
+  return !!target?.closest?.('input, textarea, select, button, a, [contenteditable="true"], .tabulator-editing');
+}
+
+function setupBaseCsvSwipeNavigation() {
+  const requiredTouches = 3;
+  let startX = 0;
+  let startY = 0;
+  let lastX = 0;
+  let lastY = 0;
+  let startTime = 0;
+  let tracking = false;
+  let verticalIntent = false;
+  let lastSwipeAt = 0;
+  const minDistance = 70;
+  const intentDistance = 18;
+  const maxDuration = 1200;
+  const cooldown = 350;
+
+  function gestureCenter(touches) {
+    let x = 0;
+    let y = 0;
+    for (let i = 0; i < touches.length; i++) {
+      x += touches[i].clientX;
+      y += touches[i].clientY;
+    }
+    return { x: x / touches.length, y: y / touches.length };
+  }
+
+  document.addEventListener('touchstart', (event) => {
+    if (!baseCsvData.length || event.touches.length !== requiredTouches || isBaseCsvSwipeIgnoredTarget(event.target)) {
+      tracking = false;
+      return;
+    }
+    event.preventDefault();
+    const center = gestureCenter(event.touches);
+    startX = center.x;
+    startY = center.y;
+    lastX = startX;
+    lastY = startY;
+    startTime = Date.now();
+    tracking = true;
+    verticalIntent = false;
+  }, { passive: false });
+
+  document.addEventListener('touchmove', (event) => {
+    if (!tracking || !baseCsvData.length) return;
+    event.preventDefault();
+    if (event.touches.length !== requiredTouches) return;
+    const center = gestureCenter(event.touches);
+    const dx = center.x - startX;
+    const dy = center.y - startY;
+    lastX = center.x;
+    lastY = center.y;
+    if (!verticalIntent && Math.abs(dy) > intentDistance && Math.abs(dy) > Math.abs(dx) * 1.2) {
+      verticalIntent = true;
+    }
+  }, { passive: false });
+
+  document.addEventListener('touchend', (event) => {
+    if (!tracking || !baseCsvData.length) {
+      tracking = false;
+      return;
+    }
+    tracking = false;
+    const dx = lastX - startX;
+    const dy = lastY - startY;
+    const elapsed = Date.now() - startTime;
+    const now = Date.now();
+    if (now - lastSwipeAt < cooldown) return;
+    if (elapsed > maxDuration || Math.abs(dy) < minDistance || Math.abs(dy) < Math.abs(dx) * 1.2) return;
+    lastSwipeAt = now;
+    if (dy < 0) {
+      baseShowNextRow();
+    } else {
+      baseShowPrevRow();
+    }
+  }, { passive: true });
+
+  document.addEventListener('touchcancel', () => {
+    tracking = false;
+  }, { passive: true });
+}
+
+setupBaseCsvSwipeNavigation();
+
 document.getElementById('base-downloadCsv').onclick = () => {
   if (!baseCsvData.length) return;
   const out = baseCsvData.map(({ __row, ...r }) => r);
