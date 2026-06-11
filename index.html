@@ -225,9 +225,145 @@
       gap: 0.6rem;
       flex-wrap: wrap;
       justify-content: flex-end;
-      margin: 0.35rem 0 0.75rem;
+      margin: 0;
     }
     .main-step-controls.is-visible { display: flex; }
+    .main-chart-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      margin: 0.35rem 0 0.75rem;
+      min-height: 42px;
+    }
+    .main-chart-identity {
+      display: flex;
+      align-items: baseline;
+      gap: 0.6rem;
+      min-width: 0;
+      color: var(--text);
+    }
+    .main-chart-identity-ticker {
+      font-size: 1.3rem;
+      font-weight: 700;
+      line-height: 1.1;
+    }
+    .main-chart-identity-name {
+      min-width: 0;
+      max-width: 52vw;
+      overflow: hidden;
+      color: var(--muted);
+      font-size: 0.95rem;
+      line-height: 1.2;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .main-gap-indicator {
+      display: grid;
+      grid-template-columns: auto auto;
+      gap: 0.15rem 0.55rem;
+      align-items: baseline;
+      min-width: 210px;
+      padding: 0.45rem 0.65rem;
+      border: 1px solid var(--border);
+      border-left: 5px solid var(--neutral);
+      border-radius: 8px;
+      background: rgba(18, 29, 45, 0.86);
+      color: var(--text);
+    }
+    .main-gap-indicator.is-up { border-left-color: var(--positive); }
+    .main-gap-indicator.is-down { border-left-color: var(--negative); }
+    .main-gap-indicator.is-flat { border-left-color: var(--neutral); }
+    .main-gap-label {
+      grid-column: 1 / -1;
+      color: var(--muted);
+      font-size: 0.72rem;
+      line-height: 1;
+      text-transform: uppercase;
+    }
+    .main-gap-state {
+      font-size: 1rem;
+      font-weight: 700;
+      line-height: 1.1;
+    }
+    .main-gap-value {
+      font-size: 0.95rem;
+      font-variant-numeric: tabular-nums;
+      line-height: 1.1;
+      text-align: right;
+    }
+    .main-chart-counter {
+      min-width: 74px;
+      padding: 0.42rem 0.65rem;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: rgba(7, 14, 24, 0.3);
+      color: var(--text);
+      font-size: 1rem;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      line-height: 1.1;
+      text-align: center;
+    }
+    .pivot-strip {
+      display: grid;
+      grid-template-columns: repeat(7, minmax(70px, 1fr));
+      gap: 0.35rem;
+      margin: 0 0 0.7rem;
+    }
+    .pivot-chip {
+      min-width: 0;
+      padding: 0.35rem 0.45rem;
+      border: 1px solid var(--border);
+      border-top: 4px solid var(--neutral);
+      border-radius: 8px;
+      background: rgba(18, 29, 45, 0.82);
+    }
+    .pivot-chip span {
+      display: block;
+      color: var(--muted);
+      font-size: 0.68rem;
+      line-height: 1;
+      text-transform: uppercase;
+    }
+    .pivot-chip strong {
+      display: block;
+      margin-top: 0.18rem;
+      color: var(--text);
+      font-size: 0.9rem;
+      font-variant-numeric: tabular-nums;
+      line-height: 1.1;
+    }
+    .pivot-chip[data-pivot="r3"] { border-top-color: #CC79A7; }
+    .pivot-chip[data-pivot="r2"] { border-top-color: #D55E00; }
+    .pivot-chip[data-pivot="r1"] { border-top-color: #E69F00; }
+    .pivot-chip[data-pivot="pp"] { border-top-color: #F0E442; }
+    .pivot-chip[data-pivot="s1"] { border-top-color: #009E73; }
+    .pivot-chip[data-pivot="s2"] { border-top-color: #0072B2; }
+    .pivot-chip[data-pivot="s3"] { border-top-color: #56B4E9; }
+    @media (max-width: 760px) {
+      .main-chart-bar {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+      .main-chart-identity-name {
+        max-width: 100%;
+        white-space: normal;
+      }
+      .main-gap-indicator {
+        width: 100%;
+      }
+      .main-chart-counter {
+        width: 100%;
+        text-align: left;
+      }
+      .pivot-strip {
+        grid-template-columns: repeat(2, minmax(90px, 1fr));
+      }
+      .main-step-controls {
+        justify-content: flex-start;
+      }
+    }
     #main-next-candle,
     #main-live-step {
       min-width: 132px;
@@ -814,6 +950,7 @@
       </div>
       <div class="d-flex align-items-center gap-2 flex-wrap mt-3">
         <input id="csvFile" type="file" accept=".csv,text/csv" class="form-control" style="max-width:260px">
+        <button id="loadCycleCsv" class="btn btn-outline-light btn-sm">Load Cycle CSV</button>
         <input id="newColumn" class="form-control" placeholder="New column name" style="max-width:200px">
         <button id="addColumn" class="btn btn-outline-success btn-sm">Add Column</button>
         <button id="prevRow" class="btn btn-outline-light btn-sm">▲ Prev</button>
@@ -863,10 +1000,31 @@
           <strong data-vwap-distance>--</strong>
         </div>
       </div>
-      <div id="main-step-controls" class="main-step-controls">
-        <button id="main-next-candle" class="btn btn-primary" type="button" disabled>Next candle</button>
-        <button id="main-live-step" class="btn btn-outline-light" type="button" disabled>Live Step: OFF</button>
-        <span id="main-live-status" class="main-live-status">Select a signal time to arm replay.</span>
+      <div class="main-chart-bar">
+        <div id="main-chart-identity" class="main-chart-identity" aria-live="polite">
+          <span id="main-chart-identity-ticker" class="main-chart-identity-ticker">SPY</span>
+          <span id="main-chart-identity-name" class="main-chart-identity-name"></span>
+        </div>
+        <div id="main-gap-indicator" class="main-gap-indicator is-flat" aria-live="polite">
+          <span class="main-gap-label">Gap From Prev 4PM Close</span>
+          <span id="main-gap-state" class="main-gap-state">Waiting</span>
+          <span id="main-gap-value" class="main-gap-value">--</span>
+        </div>
+        <div id="main-chart-counter" class="main-chart-counter">0/0</div>
+        <div id="main-step-controls" class="main-step-controls">
+          <button id="main-next-candle" class="btn btn-primary" type="button" disabled>Next candle</button>
+          <button id="main-live-step" class="btn btn-outline-light" type="button" disabled>Live Step: OFF</button>
+          <span id="main-live-status" class="main-live-status">Select a signal time to arm replay.</span>
+        </div>
+      </div>
+      <div id="pivot-strip" class="pivot-strip" aria-live="polite">
+        <div class="pivot-chip" data-pivot="r3"><span>R3</span><strong data-pivot-value="r3">--</strong></div>
+        <div class="pivot-chip" data-pivot="r2"><span>R2</span><strong data-pivot-value="r2">--</strong></div>
+        <div class="pivot-chip" data-pivot="r1"><span>R1</span><strong data-pivot-value="r1">--</strong></div>
+        <div class="pivot-chip" data-pivot="pp"><span>PP</span><strong data-pivot-value="pp">--</strong></div>
+        <div class="pivot-chip" data-pivot="s1"><span>S1</span><strong data-pivot-value="s1">--</strong></div>
+        <div class="pivot-chip" data-pivot="s2"><span>S2</span><strong data-pivot-value="s2">--</strong></div>
+        <div class="pivot-chip" data-pivot="s3"><span>S3</span><strong data-pivot-value="s3">--</strong></div>
       </div>
       <div id="chart" class="border mt-4 rounded"></div>
       <div id="cci-chart" class="cci-chart border rounded"></div>
@@ -957,6 +1115,9 @@ let contextKey = "";
 let watchlistMode = false;
 let navInFlight = false;
 let pendingRowIndex = null;
+const VALID_TIMEFRAMES = new Set(["1m", "2m", "3m", "5m", "10m", "15m", "30m", "1h"]);
+let selectedTradeDate = "";
+let selectedTimeframe = "";
 
 function setWatchlistStatus(message, isError = false) {
   const el = document.getElementById("watchlistStatus");
@@ -981,6 +1142,80 @@ function buildOpenChartUrl(ticker, date) {
   return `${base}/api/open-chart/${encodeURIComponent(t)}/${encodeURIComponent(d)}`;
 }
 
+function normalizeTimeframe(value) {
+  const tf = String(value || "").trim().toLowerCase();
+  return VALID_TIMEFRAMES.has(tf) ? tf : "";
+}
+
+function normalizeSignal(value) {
+  return String(value || "").trim().toLowerCase() === "sell" ? "sell" : "buy";
+}
+
+function normalizeHHMMValue(value) {
+  const raw = String(value || "").trim().toLowerCase();
+  if (!raw) return "";
+  const ampm = raw.match(/^(\d{1,2})(?::?(\d{2}))\s*([ap])m$/);
+  if (ampm) {
+    let hour = Number(ampm[1]);
+    const minute = Number(ampm[2]);
+    if (hour < 1 || hour > 12 || minute < 0 || minute > 59) return "";
+    if (ampm[3] === "p" && hour !== 12) hour += 12;
+    if (ampm[3] === "a" && hour === 12) hour = 0;
+    return `${String(hour).padStart(2, "0")}${String(minute).padStart(2, "0")}`;
+  }
+  const compact = raw.replace(":", "").padStart(4, "0");
+  return /^\d{4}$/.test(compact) ? compact : "";
+}
+
+function parseOpenChartRowUrl(rawUrl) {
+  const raw = String(rawUrl || "").trim();
+  if (!raw) return {};
+  try {
+    const url = new URL(raw, window.location.origin || "http://localhost:8081");
+    const out = {};
+    const parts = url.pathname.split("/").filter(Boolean);
+    const openIdx = parts.findIndex((part, idx) => part === "open-chart" && parts[idx - 1] === "api");
+    if (openIdx >= 0) {
+      if (parts[openIdx + 1]) out.ticker = decodeURIComponent(parts[openIdx + 1]);
+      if (parts[openIdx + 2]) out.date = decodeURIComponent(parts[openIdx + 2]);
+      if (parts[openIdx + 3]) out.time = decodeURIComponent(parts[openIdx + 3]);
+    }
+    if (url.searchParams.get("ticker")) out.ticker = url.searchParams.get("ticker");
+    if (url.searchParams.get("date")) out.date = url.searchParams.get("date");
+    if (url.searchParams.get("time")) out.time = url.searchParams.get("time");
+    if (url.searchParams.get("resolution")) out.timeframe = url.searchParams.get("resolution");
+    if (url.searchParams.get("signal")) out.signal = url.searchParams.get("signal");
+    return out;
+  } catch (err) {
+    console.warn("[CSV] invalid chart_url", raw, err);
+    return {};
+  }
+}
+
+function normalizeChartRow(row) {
+  const parsed = parseOpenChartRowUrl(row.chart_url);
+  const ticker = String(row.ticker || row.symbol || parsed.ticker || "").trim().toUpperCase();
+  const date = String(row.date || parsed.date || "").trim();
+  const time = normalizeHHMMValue(row.time || parsed.time) || "0930";
+  const timeframe = normalizeTimeframe(row.timeframe || row.resolution || parsed.timeframe);
+  row.ticker = ticker;
+  if (!row.symbol) row.symbol = ticker;
+  if (date) {
+    row.date = date;
+  } else {
+    delete row.date;
+  }
+  row.time = time;
+  row.signal = normalizeSignal(row.signal || parsed.signal);
+  if (timeframe) {
+    row.timeframe = timeframe;
+    if (!row.resolution) row.resolution = timeframe;
+  } else {
+    delete row.timeframe;
+  }
+  return row;
+}
+
 function updateOpenChartLink(tickerOverride = "") {
   const ticker = String(tickerOverride || document.getElementById("ticker")?.value || "").trim().toUpperCase();
   const date = String(document.getElementById("tradeDate")?.value || "").trim();
@@ -997,6 +1232,19 @@ function updateOpenChartLink(tickerOverride = "") {
   linkEl.href = url;
   linkEl.textContent = url;
   textEl.value = url;
+}
+
+const companyNameCache = {};
+
+function updateMainChartIdentity(ticker, companyName = "") {
+  const tickerEl = document.getElementById("main-chart-identity-ticker");
+  const nameEl = document.getElementById("main-chart-identity-name");
+  if (!tickerEl || !nameEl) return;
+  const cleanTicker = String(ticker || document.getElementById("ticker")?.value || "").trim().toUpperCase();
+  const cleanName = String(companyName || companyNameCache[cleanTicker] || "").trim();
+  tickerEl.textContent = cleanTicker || "--";
+  nameEl.textContent = cleanName;
+  nameEl.title = cleanName;
 }
 
 function removeMarketauxSections() {
@@ -1467,7 +1715,19 @@ function toggleMainLiveStep() {
 const nyFormatter = new Intl.DateTimeFormat('en-CA',{
   timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit'});
 const currentNyDate = nyFormatter.format(new Date());
-flatpickr('#tradeDate',{dateFormat:'Y-m-d',defaultDate:currentNyDate});
+const tradeDatePicker = flatpickr('#tradeDate',{
+  dateFormat:'Y-m-d',
+  defaultDate:currentNyDate,
+  onChange: (_, dateStr) => {
+    selectedTradeDate = dateStr;
+    updateOpenChartLink();
+  },
+  onValueUpdate: (_, dateStr) => {
+    selectedTradeDate = dateStr;
+  }
+});
+selectedTradeDate = document.getElementById('tradeDate').value || currentNyDate;
+selectedTimeframe = document.getElementById('timeframe').value || "1m";
 const nyTimeFormatter = new Intl.DateTimeFormat('en-US', {
   timeZone: 'America/New_York',
   hour: 'numeric',
@@ -1846,6 +2106,20 @@ function dailyPivotFormatPrice(value) {
   return n.toFixed(2);
 }
 
+function formatGapDollars(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "";
+  const sign = n > 0 ? "+" : "";
+  return `${sign}$${n.toFixed(2)}`;
+}
+
+function formatGapPercent(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "";
+  const sign = n > 0 ? "+" : "";
+  return `${sign}${n.toFixed(2)}%`;
+}
+
 function calculateDailyPivots(sessionCandles) {
   const candles = (Array.isArray(sessionCandles) ? sessionCandles : [])
     .filter(c => c &&
@@ -1875,14 +2149,23 @@ function calculateDailyPivots(sessionCandles) {
 
 function dailyPivotLineSpecs() {
   return [
-    { key: "r3", label: "R3", color: "#CC79A7", style: 1, width: 1 },
-    { key: "r2", label: "R2", color: "#D55E00", style: 2, width: 1 },
-    { key: "r1", label: "R1", color: "#E69F00", style: 0, width: 1 },
-    { key: "pp", label: "PP", color: "#F0E442", style: 0, width: 2 },
-    { key: "s1", label: "S1", color: "#009E73", style: 0, width: 1 },
-    { key: "s2", label: "S2", color: "#0072B2", style: 2, width: 1 },
-    { key: "s3", label: "S3", color: "#56B4E9", style: 1, width: 1 }
+    { key: "r3", label: "R3", color: "#CC79A7", style: 1, width: 2 },
+    { key: "r2", label: "R2", color: "#D55E00", style: 2, width: 2 },
+    { key: "r1", label: "R1", color: "#E69F00", style: 0, width: 2 },
+    { key: "pp", label: "PP", color: "#F0E442", style: 0, width: 3 },
+    { key: "s1", label: "S1", color: "#009E73", style: 0, width: 2 },
+    { key: "s2", label: "S2", color: "#0072B2", style: 2, width: 2 },
+    { key: "s3", label: "S3", color: "#56B4E9", style: 1, width: 2 }
   ];
+}
+
+function updatePivotStrip(pivots = null) {
+  for (const spec of dailyPivotLineSpecs()) {
+    const el = document.querySelector(`[data-pivot-value="${spec.key}"]`);
+    if (!el) continue;
+    const price = Number(pivots?.[spec.key]);
+    el.textContent = Number.isFinite(price) ? dailyPivotFormatPrice(price) : "--";
+  }
 }
 
 function clearDailyPivotPriceLines(series) {
@@ -1898,6 +2181,7 @@ function clearDailyPivotPriceLines(series) {
     }
   }
   dailyPivotPriceLines = [];
+  updatePivotStrip(null);
 }
 
 function addDailyPivotPriceLines(series, pivots) {
@@ -1929,6 +2213,7 @@ async function updateDailyPivots(tickerValue, dateStr) {
     const pivots = calculateDailyPivots(rthCandles);
     if (!pivots || token !== dailyPivotRenderToken) return;
     addDailyPivotPriceLines(candleSeries, pivots);
+    updatePivotStrip(pivots);
   } catch (err) {
     if (token === dailyPivotRenderToken) {
       clearDailyPivotPriceLines(candleSeries);
@@ -2771,6 +3056,7 @@ let cachedCci = [];
 let cachedTpoCandles = [];
 let dailyPivotPriceLines = [];
 let dailyPivotRenderToken = 0;
+let previousClosePriceLine = null;
 let mainStepModeEnabled = false;
 let mainStepStarted = false;
 let mainStepVisibleCandles = 0;
@@ -2787,34 +3073,115 @@ let priorDayCloses = {}; // Store prior‑day closes
 let priorDayVolumes = {}; // New: Store prior-day RTH volumes
 let priorDayDates = {};
 
+function priorCloseKey(ticker, dateStr) {
+  return `${String(ticker || "").trim().toUpperCase()}:${String(dateStr || "").trim()}`;
+}
+
+function getPriorClose(ticker, dateStr) {
+  const key = String(ticker || "").trim().toUpperCase();
+  return priorDayCloses[priorCloseKey(key, dateStr)] ?? priorDayCloses[key];
+}
+
+function clearPreviousCloseLine() {
+  if (!previousClosePriceLine) return;
+  try {
+    candleSeries.removePriceLine(previousClosePriceLine);
+  } catch (err) {
+    console.debug("[gap] unable to remove previous close line", err?.message || err);
+  }
+  previousClosePriceLine = null;
+}
+
+function setPreviousCloseLine(price) {
+  clearPreviousCloseLine();
+  const n = Number(price);
+  if (!Number.isFinite(n)) return;
+  previousClosePriceLine = candleSeries.createPriceLine({
+    price: n,
+    color: "#8ca0bc",
+    lineWidth: 2,
+    lineStyle: 2,
+    axisLabelVisible: true,
+    title: `Prev 4PM ${dailyPivotFormatPrice(n)}`
+  });
+}
+
+function updateGapIndicator(ticker, dateStr) {
+  const panel = document.getElementById("main-gap-indicator");
+  const stateEl = document.getElementById("main-gap-state");
+  const valueEl = document.getElementById("main-gap-value");
+  if (!panel || !stateEl || !valueEl) return;
+  panel.classList.remove("is-up", "is-down", "is-flat");
+  const priorClose = Number(getPriorClose(ticker, dateStr));
+  const openCandle = (Array.isArray(cachedMinCandles) && cachedMinCandles.length ? cachedMinCandles : cachedCandles)[0];
+  const sessionOpen = Number(openCandle?.open);
+  if (!Number.isFinite(priorClose) || priorClose <= 0 || !Number.isFinite(sessionOpen)) {
+    panel.classList.add("is-flat");
+    stateEl.textContent = "Waiting";
+    valueEl.textContent = "--";
+    clearPreviousCloseLine();
+    return;
+  }
+  const diff = sessionOpen - priorClose;
+  const pct = (diff / priorClose) * 100;
+  const direction = Math.abs(pct) < 0.05 ? "flat" : (pct > 0 ? "up" : "down");
+  panel.classList.add(`is-${direction}`);
+  stateEl.textContent = direction === "flat" ? "Flat open" : `Gap ${direction}`;
+  valueEl.textContent = `${formatGapPercent(pct)} / ${formatGapDollars(diff)}`;
+  valueEl.title = `Open ${dailyPivotFormatPrice(sessionOpen)} vs previous 4PM close ${dailyPivotFormatPrice(priorClose)}`;
+  setPreviousCloseLine(priorClose);
+}
+
 /* ─── Load candles with debug logging ────────────────────── */
 async function load(e, skipDefaultRow = false){
   if(e) e.preventDefault();
   const ticker = document.getElementById('ticker').value.trim();
   const timeframe= document.getElementById('timeframe').value;
   const date = document.getElementById('tradeDate').value;
+  if (date) selectedTradeDate = date;
+  if (timeframe) selectedTimeframe = timeframe;
   const contextTabActive = document.getElementById('context').classList.contains('show');
   contextLoaded = false;
   contextKey = "";
   console.debug('[load] requesting',{ticker,timeframe,date});
   if(!ticker||!timeframe||!date){alert('Fill all fields');return;}
+  updateMainChartIdentity(ticker);
   updateOpenChartLink(ticker);
   try{
     const {data}=await axios.get('/api/candles',{params:{ticker,timeframe,date}});
     console.debug('[load] received',data.candles.length,'bars');
     if(!data.candles.length){
       console.warn('[load] no candles',ticker,date,timeframe);
-      if (watchlistMode) {
+      cachedCandles = [];
+      cachedVolume = [];
+      cachedMinCandles = [];
+      cachedMinVolume = [];
+      cachedVwap = [];
+      cachedSma = [];
+      cachedCci = [];
+      cachedTpoCandles = [];
+      candleSeries.setData([]);
+      volumeSeries.setData([]);
+      vwapSeries.setData([]);
+      smaSeries.setData([]);
+      cciPlot.line.setData([]);
+      candleSeries.setMarkers([]);
+      updateVwapSlopePanel("vwap-slope-panel", [], []);
+      updateCciPanel("cci-panel", []);
+      clearPreviousCloseLine();
+      clearDailyPivotPriceLines(candleSeries);
+      renderTpoCharts('tpo-chart-container', ticker, date, []);
+      disarmMainStep("No RTH data for this chart.");
+      if (watchlistMode || isCsvUploaded) {
         setWatchlistStatus(`No RTH data for ${ticker.toUpperCase()} on ${date}.`, true);
       } else {
         alert('No RTH data for this date; try the prior trading day.');
       }
-    } else if (watchlistMode) {
+      return;
+    } else if (watchlistMode || isCsvUploaded) {
       setWatchlistStatus(`Viewing ${ticker.toUpperCase()} on ${date}.`);
     }
-    if (!watchlistMode) {
-      await fetchPriorDayClose(ticker,date);
-    }
+    await fetchPriorDayClose(ticker,date);
     const tpoChartCandles = Array.isArray(data.minCandles) ? data.minCandles.map(c => ({ ...c })) : [];
     // Determine multMin for aggregation
     let multMin;
@@ -2912,6 +3279,7 @@ async function load(e, skipDefaultRow = false){
     updateVwapSlopePanel("vwap-slope-panel", cachedVwap, cachedMinCandles);
     updateCciPanel("cci-panel", cachedCci);
     candleSeries.setMarkers([]);
+    updateGapIndicator(ticker, date);
     setSessionVisibleRange(chart, date);
     setSessionVisibleRange(cciPlot.chart, date);
     drawRthOpenLine(chart, document.getElementById('chart'), date);
@@ -3004,7 +3372,8 @@ async function load(e, skipDefaultRow = false){
 /* ─── Fetch prior‑day close (handles holidays/weekends) ─── */
 async function fetchPriorDayClose(ticker,date){
   const key = ticker.toUpperCase(); // *** NEW: normalise once ***
-  if(priorDayCloses[key]) return; // cached
+  const datedKey = priorCloseKey(key, date);
+  if(priorDayCloses[datedKey]) return; // cached
   let d = new Date(date);
   d.setDate(d.getDate() - 1);
   const to_date = d.toISOString().split('T')[0];
@@ -3016,6 +3385,7 @@ async function fetchPriorDayClose(ticker,date){
       {params:{ticker: key,timeframe:'1d',from:from_date,to:to_date}});
     if(data.candles&&data.candles.length>0){
       const last=data.candles[data.candles.length-1];
+      priorDayCloses[datedKey]=last.close;
       priorDayCloses[key]=last.close;
       console.debug('[priorDay] close',key,last.close);
       // New: Prior day volume (RTH cumulative)
@@ -3055,9 +3425,16 @@ function metricColumnTitle(field) {
 }
 
 /* Update table view to show only current row */
+function updateMainChartCounter() {
+  const el = document.getElementById("main-chart-counter");
+  if (!el) return;
+  el.textContent = csvData.length ? `${currentRow + 1}/${csvData.length}` : "0/0";
+}
+
 function updateTableView(){
   if (!csvData.length) {
     document.getElementById('row-indicator').textContent = '0/0';
+    updateMainChartCounter();
     const jumpInput = document.getElementById("jumpToChart");
     if (jumpInput) {
       jumpInput.value = "";
@@ -3073,6 +3450,7 @@ function updateTableView(){
   });
   // Update row indicator
   document.getElementById('row-indicator').textContent = `${currentRow + 1}/${csvData.length}`;
+  updateMainChartCounter();
   const jumpInput = document.getElementById("jumpToChart");
   if (jumpInput) {
     jumpInput.max = String(csvData.length);
@@ -3307,20 +3685,32 @@ async function calculateMetricsForRow(row){
   }
 }
 
-/* ─── CSV upload handler ─────────────────────────────────── */
-document.getElementById('csvFile').addEventListener('change',async e=>{
+async function loadCsvText(text, sourceName = "CSV", options = {}) {
+  const dateInput = document.getElementById('tradeDate');
+  const timeframeInput = document.getElementById('timeframe');
+  const preservedDate = options.selectedDate || selectedTradeDate || dateInput.value;
+  const preservedTimeframe = normalizeTimeframe(options.selectedTimeframe || selectedTimeframe || timeframeInput.value) || "1m";
+  if (preservedDate) {
+    selectedTradeDate = preservedDate;
+    if (tradeDatePicker) {
+      tradeDatePicker.setDate(preservedDate, false);
+    } else {
+      dateInput.value = preservedDate;
+    }
+  }
+  selectedTimeframe = preservedTimeframe;
+  timeframeInput.value = preservedTimeframe;
   watchlistMode = false;
   setWatchlistStatus("");
   isCsvUploaded = true;
-  const file=e.target.files[0]; if(!file) return;
-  const text=await file.text();
   const p=Papa.parse(text.trim(),{header:true,skipEmptyLines:true});
-  csvData=p.data.map((r,i)=>({__row:i,...r}));
+  csvData=p.data.map((r,i)=>normalizeChartRow({__row:i,...r}));
   if(!csvData.length){alert("CSV seems empty");return;}
   csvData.forEach(row=>{
     NEW_COLUMNS.forEach(col=>{if(!(col in row)) row[col]="";});
   });
-  const allFields=[...new Set([...p.meta.fields,...NEW_COLUMNS])];
+  const rowFields = csvData.flatMap(row => Object.keys(row).filter(k => k !== "__row"));
+  const allFields=[...new Set([...(p.meta.fields || []), ...rowFields, ...NEW_COLUMNS])];
   const cols=allFields.map(h=>({
     title:metricColumnTitle(h),
     field:h,
@@ -3333,13 +3723,34 @@ document.getElementById('csvFile').addEventListener('change',async e=>{
     title:"#",formatter:"rownum",hozAlign:"center",width:40,frozen:true
   });
   table.setColumns(cols);
-  table.setData(csvData).then(()=>{
-    currentRow=0;
-    console.debug('[CSV] loaded',csvData.length,'rows');
-    updateTableView();
-    console.debug('[CSV] showing row',currentRow,csvData[currentRow]);
-    showSignalOnChart(csvData[currentRow]);
-  });
+  await table.setData(csvData);
+  currentRow=0;
+  console.debug('[CSV] loaded',csvData.length,'rows');
+  updateTableView();
+  setWatchlistStatus(`Loaded ${csvData.length} charts from ${sourceName}.`);
+  console.debug('[CSV] showing row',currentRow,csvData[currentRow]);
+  await showSignalOnChart(csvData[currentRow]);
+}
+
+/* ─── CSV upload handler ─────────────────────────────────── */
+document.getElementById('csvFile').addEventListener('change',async e=>{
+  const file=e.target.files[0]; if(!file) return;
+  const selectedDate = selectedTradeDate || document.getElementById('tradeDate').value;
+  const selectedTimeframe = document.getElementById('timeframe').value;
+  const text=await file.text();
+  await loadCsvText(text, file.name, { selectedDate, selectedTimeframe });
+});
+
+document.getElementById('loadCycleCsv').addEventListener('click', async () => {
+  try {
+    const resp = await fetch('/api/cycle-csv');
+    const text = await resp.text();
+    if (!resp.ok) throw new Error(text || `HTTP ${resp.status}`);
+    await loadCsvText(text, resp.headers.get('X-Cycle-Csv-Filename') || 'latest cycle CSV');
+  } catch (err) {
+    console.error('[CSV] failed to load cycle CSV', err);
+    setWatchlistStatus(`Failed to load cycle CSV: ${err.message || err}`, true);
+  }
 });
 
 /* ─── Add Column ─────────────────────────────────────────── */
@@ -3352,13 +3763,15 @@ document.getElementById('addColumn').onclick=()=>{
 };
 
 function showPrevRow() {
+  if (!csvData.length) return false;
   if(currentRow>0) return queueRowNavigation(currentRow - 1);
-  return false;
+  return queueRowNavigation(csvData.length - 1);
 }
 
 function showNextRow() {
+  if (!csvData.length) return false;
   if(currentRow<csvData.length-1) return queueRowNavigation(currentRow + 1);
-  return false;
+  return queueRowNavigation(0);
 }
 
 function queueRowNavigation(targetIndex) {
@@ -3455,21 +3868,52 @@ function combineDateAndTime(dateStr,HHMM){
 
 async function showSignalOnChart(row){
   console.debug('[show] row →',row);
-  const currentTicker = document.getElementById('ticker').value.toUpperCase();
-  if (row.ticker.toUpperCase() !== currentTicker) {
-    document.getElementById('ticker').value = row.ticker.toUpperCase();
+  normalizeChartRow(row);
+  if (!row.ticker) {
+    setWatchlistStatus("Current CSV row has no ticker or symbol.", true);
+    return;
+  }
+  const tickerInput = document.getElementById('ticker');
+  const timeframeInput = document.getElementById('timeframe');
+  const dateInput = document.getElementById('tradeDate');
+  const nextTicker = row.ticker.toUpperCase();
+  const nextTimeframe = normalizeTimeframe(row.timeframe || row.resolution) || selectedTimeframe || timeframeInput.value || "1m";
+  const nextDate = row.date || selectedTradeDate || dateInput.value;
+  const shouldReload =
+    tickerInput.value.trim().toUpperCase() !== nextTicker ||
+    timeframeInput.value !== nextTimeframe ||
+    dateInput.value !== nextDate ||
+    cachedMinCandles.length === 0;
+  tickerInput.value = nextTicker;
+  timeframeInput.value = nextTimeframe;
+  selectedTimeframe = nextTimeframe;
+  if (nextDate) {
+    selectedTradeDate = nextDate;
+    if (tradeDatePicker) {
+      tradeDatePicker.setDate(nextDate, false);
+    } else {
+      dateInput.value = nextDate;
+    }
+  }
+  if (shouldReload) {
     await load(null, true); // Load with skipDefaultRow = true to avoid recursion
+  }
+  if (!cachedMinCandles.length) {
+    table.updateData([row]);
+    updateOpenChartLink(nextTicker);
+    setWatchlistStatus(`No RTH data for ${nextTicker} on ${nextDate}. Use next/previous to continue.`, true);
+    return;
   }
   if (!watchlistMode) {
     await calculateMetricsForRow(row); // enrich row metrics (async)
     table.updateData([row]); // show updates in grid
   }
-  updateOpenChartLink(row.ticker);
-  const hhmm = String(row.time).replace(':','').padStart(4,'0');
-  const ts = combineDateAndTime(document.getElementById('tradeDate').value, hhmm);
+  updateOpenChartLink(nextTicker);
+  const hhmm = normalizeHHMMValue(row.time) || "0930";
+  const ts = combineDateAndTime(nextDate, hhmm);
   updateVwapSlopePanel("vwap-slope-panel", cachedVwap, cachedMinCandles, ts / 1000);
   updateCciPanel("cci-panel", cachedCci, ts / 1000, row.signal);
-  armMainStepFromTime(ts / 1000, row.ticker, document.getElementById('tradeDate').value, row.signal);
+  armMainStepFromTime(ts / 1000, nextTicker, nextDate, row.signal);
   const isBuy = row.signal.toLowerCase() === "buy";
   if (hhmm === '0930') {
     candleSeries.setMarkers([]);
@@ -3543,6 +3987,12 @@ async function displayExtra(ticker, date) {
     const profileContainer = document.getElementById('profile-container');
     profileContainer.innerHTML = '';
     const prof = Array.isArray(profile) ? profile[0] : profile;
+    if (prof && prof.companyName) {
+      companyNameCache[String(ticker || "").trim().toUpperCase()] = prof.companyName;
+      updateMainChartIdentity(ticker, prof.companyName);
+    } else {
+      updateMainChartIdentity(ticker);
+    }
     if (prof && Object.keys(prof).length) {
       profileContainer.innerHTML = `
         <h4>Company Profile (Easy Digest for Day Traders)</h4>
@@ -3668,8 +4118,17 @@ window.addEventListener('resize', () => {
 });
 
 document.getElementById('ticker').addEventListener('input', () => updateOpenChartLink());
-document.getElementById('tradeDate').addEventListener('change', () => updateOpenChartLink());
-document.getElementById('tradeDate').addEventListener('input', () => updateOpenChartLink());
+document.getElementById('timeframe').addEventListener('change', () => {
+  selectedTimeframe = document.getElementById('timeframe').value || "1m";
+});
+document.getElementById('tradeDate').addEventListener('change', () => {
+  selectedTradeDate = document.getElementById('tradeDate').value || selectedTradeDate;
+  updateOpenChartLink();
+});
+document.getElementById('tradeDate').addEventListener('input', () => {
+  selectedTradeDate = document.getElementById('tradeDate').value || selectedTradeDate;
+  updateOpenChartLink();
+});
 updateOpenChartLink();
 </script>
 </body>

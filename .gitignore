@@ -1,3 +1,5 @@
 .env
 go.sum
 .codex
+data/*.json
+data/*.tmp

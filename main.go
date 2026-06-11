@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -53,6 +54,8 @@ var defaultNtfyTagOptions = []string{
 	"flush base",
 }
 
+const dataDir = "data"
+
 var marketNewsLocation = func() *time.Location {
 	loc, err := time.LoadLocation("America/New_York")
 	if err != nil {
@@ -78,6 +81,18 @@ type polygonBar struct {
 
 type polygonResp struct {
 	Results []polygonBar `json:"results"`
+}
+
+type polygonCacheFile struct {
+	FetchedAt int64        `json:"fetched_at"`
+	Complete  bool         `json:"complete"`
+	Results   []polygonBar `json:"results"`
+}
+
+type jsonCacheFile struct {
+	FetchedAt int64           `json:"fetched_at"`
+	Complete  bool            `json:"complete"`
+	Data      json.RawMessage `json:"data"`
 }
 
 type candlePoint struct {
@@ -419,28 +434,20 @@ func queryMarketaux(path string, params url.Values) ([]marketauxEntityStat, erro
 			p.Add(k, val)
 		}
 	}
+	cacheKey := p.Encode()
 	p.Set("api_token", marketauxAPIKey)
 	endpoint := "https://api.marketaux.com" + path + "?" + p.Encode()
-	req, err := http.NewRequest(http.MethodGet, endpoint, nil)
+	complete := false
+	if before := strings.TrimSpace(params.Get("published_before")); len(before) >= len("2006-01-02") {
+		complete = before[:len("2006-01-02")] < nyDateString(time.Now().UTC())
+	}
+	payload, err := cachedJSONGet[map[string]interface{}](
+		jsonCachePath("marketaux", strings.Trim(path, "/"), cacheKey),
+		endpoint,
+		60*time.Second,
+		complete,
+	)
 	if err != nil {
-		return nil, err
-	}
-	client := &http.Client{Timeout: 12 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
-		msg := strings.TrimSpace(string(body))
-		if msg == "" {
-			msg = resp.Status
-		}
-		return nil, fmt.Errorf("Marketaux %s: %s", path, msg)
-	}
-	var payload map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		return nil, err
 	}
 	return parseMarketauxRows(payload["data"]), nil
@@ -564,7 +571,277 @@ func buildTickerRadar(m15, m60, session, trend marketauxEntityStat) map[string]i
 	}
 }
 
-func queryPolygon(sym string, mult int, span, from, to string) ([]polygonBar, error) {
+var polygonCacheMu sync.Mutex
+
+func ensureDataDir() error {
+	return os.MkdirAll(dataDir, 0755)
+}
+
+func sanitizeCachePart(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "empty"
+	}
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z':
+			b.WriteRune(r)
+		case r >= 'A' && r <= 'Z':
+			b.WriteRune(r)
+		case r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case r == '.', r == '-', r == '_':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('_')
+		}
+	}
+	return b.String()
+}
+
+func polygonCachePath(sym string, mult int, span, from, to string) string {
+	name := fmt.Sprintf("polygon_%s_%d_%s_%s_%s.json",
+		sanitizeCachePart(strings.ToUpper(sym)),
+		mult,
+		sanitizeCachePart(strings.ToLower(span)),
+		sanitizeCachePart(from),
+		sanitizeCachePart(to),
+	)
+	return filepath.Join(dataDir, name)
+}
+
+func jsonCachePath(kind string, parts ...string) string {
+	clean := []string{sanitizeCachePart(kind)}
+	for _, part := range parts {
+		clean = append(clean, sanitizeCachePart(part))
+	}
+	return filepath.Join(dataDir, strings.Join(clean, "_")+".json")
+}
+
+func nyDateString(t time.Time) string {
+	return t.In(marketNewsLocation).Format("2006-01-02")
+}
+
+func dateScopedDataIsComplete(dateStr string, now time.Time) bool {
+	today := nyDateString(now)
+	if dateStr < today {
+		return true
+	}
+	if dateStr > today {
+		return false
+	}
+	ny := now.In(marketNewsLocation)
+	settled := time.Date(ny.Year(), ny.Month(), ny.Day(), 20, 15, 0, 0, marketNewsLocation)
+	return !ny.Before(settled)
+}
+
+func polygonRequestIsComplete(to string, now time.Time) bool {
+	today := nyDateString(now)
+	if to < today {
+		return true
+	}
+	if to > today {
+		return false
+	}
+	ny := now.In(marketNewsLocation)
+	closeSettled := time.Date(ny.Year(), ny.Month(), ny.Day(), 16, 15, 0, 0, marketNewsLocation)
+	return !ny.Before(closeSettled)
+}
+
+func polygonCacheIsFresh(cache polygonCacheFile, to string, now time.Time) bool {
+	if cache.Complete {
+		return true
+	}
+	ttl := 10 * time.Second
+	if to < nyDateString(now) {
+		ttl = 0
+	}
+	return ttl > 0 && now.Sub(time.Unix(cache.FetchedAt, 0)) < ttl
+}
+
+func readPolygonCache(path, to string, now time.Time) (polygonCacheFile, bool, bool) {
+	polygonCacheMu.Lock()
+	defer polygonCacheMu.Unlock()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return polygonCacheFile{}, false, false
+	}
+	var cache polygonCacheFile
+	if err := json.Unmarshal(data, &cache); err != nil || cache.Results == nil {
+		return polygonCacheFile{}, false, false
+	}
+	return cache, true, polygonCacheIsFresh(cache, to, now)
+}
+
+func writePolygonCache(path string, cache polygonCacheFile) {
+	if err := ensureDataDir(); err != nil {
+		log.Printf("cache: cannot create %s: %v", dataDir, err)
+		return
+	}
+	data, err := json.Marshal(cache)
+	if err != nil {
+		log.Printf("cache: cannot marshal %s: %v", path, err)
+		return
+	}
+	tmp := path + ".tmp"
+	polygonCacheMu.Lock()
+	defer polygonCacheMu.Unlock()
+	if err := os.WriteFile(tmp, data, 0644); err != nil {
+		log.Printf("cache: cannot write %s: %v", tmp, err)
+		return
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		log.Printf("cache: cannot rename %s: %v", path, err)
+	}
+}
+
+func readJSONCache(path string, ttl time.Duration, now time.Time) (json.RawMessage, bool, bool) {
+	polygonCacheMu.Lock()
+	defer polygonCacheMu.Unlock()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, false, false
+	}
+	var cache jsonCacheFile
+	if err := json.Unmarshal(data, &cache); err != nil || cache.Data == nil {
+		return nil, false, false
+	}
+	fresh := cache.Complete || (ttl > 0 && now.Sub(time.Unix(cache.FetchedAt, 0)) < ttl)
+	return cache.Data, true, fresh
+}
+
+func writeJSONCache(path string, data json.RawMessage, complete bool, now time.Time) {
+	if len(data) == 0 {
+		return
+	}
+	if err := ensureDataDir(); err != nil {
+		log.Printf("cache: cannot create %s: %v", dataDir, err)
+		return
+	}
+	cacheBytes, err := json.Marshal(jsonCacheFile{
+		FetchedAt: now.Unix(),
+		Complete:  complete,
+		Data:      data,
+	})
+	if err != nil {
+		log.Printf("cache: cannot marshal %s: %v", path, err)
+		return
+	}
+	tmp := path + ".tmp"
+	polygonCacheMu.Lock()
+	defer polygonCacheMu.Unlock()
+	if err := os.WriteFile(tmp, cacheBytes, 0644); err != nil {
+		log.Printf("cache: cannot write %s: %v", tmp, err)
+		return
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		log.Printf("cache: cannot rename %s: %v", path, err)
+	}
+}
+
+func decodeCachedJSON[T any](raw json.RawMessage) (T, error) {
+	var out T
+	err := json.Unmarshal(raw, &out)
+	return out, err
+}
+
+func cachedJSONGet[T any](path, endpoint string, ttl time.Duration, complete bool) (T, error) {
+	now := time.Now()
+	if raw, hasCached, fresh := readJSONCache(path, ttl, now); fresh {
+		return decodeCachedJSON[T](raw)
+	} else if hasCached {
+		resp, err := http.Get(endpoint)
+		if err == nil {
+			defer resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				raw, readErr := io.ReadAll(resp.Body)
+				if readErr == nil {
+					writeJSONCache(path, raw, complete, now)
+					return decodeCachedJSON[T](raw)
+				}
+				err = readErr
+			} else {
+				err = fmt.Errorf("GET %s: %s", endpoint, resp.Status)
+			}
+		}
+		log.Printf("cache: using stale data for %s after fetch error: %v", path, err)
+		return decodeCachedJSON[T](raw)
+	}
+
+	resp, err := http.Get(endpoint)
+	var zero T
+	if err != nil {
+		return zero, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return zero, fmt.Errorf("GET %s: %s", endpoint, resp.Status)
+	}
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return zero, err
+	}
+	writeJSONCache(path, raw, complete, now)
+	return decodeCachedJSON[T](raw)
+}
+
+func cachedJSONPost[T any](path, endpoint string, body []byte, headers map[string]string, ttl time.Duration, complete bool) (T, error) {
+	now := time.Now()
+	if raw, hasCached, fresh := readJSONCache(path, ttl, now); fresh {
+		return decodeCachedJSON[T](raw)
+	} else if hasCached {
+		req, err := http.NewRequest("POST", endpoint, bytes.NewBuffer(body))
+		if err == nil {
+			for k, v := range headers {
+				req.Header.Set(k, v)
+			}
+			resp, doErr := http.DefaultClient.Do(req)
+			if doErr == nil {
+				defer resp.Body.Close()
+				if resp.StatusCode == http.StatusOK {
+					raw, readErr := io.ReadAll(resp.Body)
+					if readErr == nil {
+						writeJSONCache(path, raw, complete, now)
+						return decodeCachedJSON[T](raw)
+					}
+					err = readErr
+				} else {
+					err = fmt.Errorf("POST %s: %s", endpoint, resp.Status)
+				}
+			} else {
+				err = doErr
+			}
+		}
+		log.Printf("cache: using stale data for %s after fetch error: %v", path, err)
+		return decodeCachedJSON[T](raw)
+	}
+
+	req, err := http.NewRequest("POST", endpoint, bytes.NewBuffer(body))
+	var zero T
+	if err != nil {
+		return zero, err
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return zero, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return zero, fmt.Errorf("POST %s: %s", endpoint, resp.Status)
+	}
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return zero, err
+	}
+	writeJSONCache(path, raw, complete, now)
+	return decodeCachedJSON[T](raw)
+}
+
+func fetchPolygon(sym string, mult int, span, from, to string) ([]polygonBar, error) {
 	url := fmt.Sprintf(
 		"https://api.massive.com/v2/aggs/ticker/%s/range/%d/%s/%s/%s?adjusted=true&sort=asc&apiKey=%s",
 		sym, mult, span, from, to, polygonAPIKey)
@@ -583,55 +860,67 @@ func queryPolygon(sym string, mult int, span, from, to string) ([]polygonBar, er
 	return pr.Results, nil
 }
 
-func queryPolygonTickerDetails(ticker string) (*PolygonTickerDetails, error) {
-	url := fmt.Sprintf("https://api.massive.com/v3/reference/tickers/%s?apiKey=%s", ticker, polygonAPIKey)
-	resp, err := http.Get(url)
+func queryPolygon(sym string, mult int, span, from, to string) ([]polygonBar, error) {
+	if err := ensureDataDir(); err != nil {
+		log.Printf("cache: cannot create %s: %v", dataDir, err)
+	}
+	path := polygonCachePath(sym, mult, span, from, to)
+	now := time.Now()
+	cached, hasCached, fresh := readPolygonCache(path, to, now)
+	if fresh {
+		return cached.Results, nil
+	}
+	results, err := fetchPolygon(sym, mult, span, from, to)
 	if err != nil {
+		if hasCached {
+			log.Printf("cache: using stale Polygon data for %s %d %s %s-%s after fetch error: %v", sym, mult, span, from, to, err)
+			return cached.Results, nil
+		}
 		return nil, err
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("Polygon Ticker Details: %s", resp.Status)
-	}
-	var details PolygonTickerDetails
-	if err := json.NewDecoder(resp.Body).Decode(&details); err != nil {
+	writePolygonCache(path, polygonCacheFile{
+		FetchedAt: now.Unix(),
+		Complete:  polygonRequestIsComplete(to, now),
+		Results:   results,
+	})
+	return results, nil
+}
+
+func queryPolygonTickerDetails(ticker string) (*PolygonTickerDetails, error) {
+	ticker = strings.ToUpper(strings.TrimSpace(ticker))
+	endpoint := fmt.Sprintf("https://api.massive.com/v3/reference/tickers/%s?apiKey=%s", ticker, polygonAPIKey)
+	details, err := cachedJSONGet[PolygonTickerDetails](
+		jsonCachePath("ticker_details", ticker),
+		endpoint,
+		24*time.Hour,
+		false,
+	)
+	if err != nil {
 		return nil, err
 	}
 	return &details, nil
 }
 
 func queryFMPFloat(ticker string) ([]FMPFloat, error) {
-	url := fmt.Sprintf("https://financialmodelingprep.com/api/v4/shares_float?symbol=%s&apikey=%s", ticker, fmpAPIKey)
-	resp, err := http.Get(url)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("FMP Float: %s", resp.Status)
-	}
-	var floats []FMPFloat
-	if err := json.NewDecoder(resp.Body).Decode(&floats); err != nil {
-		return nil, err
-	}
-	return floats, nil
+	ticker = strings.ToUpper(strings.TrimSpace(ticker))
+	endpoint := fmt.Sprintf("https://financialmodelingprep.com/api/v4/shares_float?symbol=%s&apikey=%s", ticker, fmpAPIKey)
+	return cachedJSONGet[[]FMPFloat](
+		jsonCachePath("fmp_float", ticker),
+		endpoint,
+		24*time.Hour,
+		false,
+	)
 }
 
 func queryFMPProfile(symbol string) ([]map[string]interface{}, error) {
-	url := fmt.Sprintf("https://financialmodelingprep.com/api/v3/profile/%s?apikey=%s", symbol, fmpAPIKey)
-	resp, err := http.Get(url)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("FMP Profile: %s", resp.Status)
-	}
-	var profile []map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&profile); err != nil {
-		return nil, err
-	}
-	return profile, nil
+	symbol = strings.ToUpper(strings.TrimSpace(symbol))
+	endpoint := fmt.Sprintf("https://financialmodelingprep.com/api/v3/profile/%s?apikey=%s", symbol, fmpAPIKey)
+	return cachedJSONGet[[]map[string]interface{}](
+		jsonCachePath("fmp_profile", symbol),
+		endpoint,
+		24*time.Hour,
+		false,
+	)
 }
 
 // queryMassiveBenzingaNews uses Massive real-time Benzinga news:
@@ -647,39 +936,31 @@ func queryMassiveBenzingaNews(ticker, dateStr string) ([]map[string]interface{},
 	params.Set("order", "desc")
 	params.Set("apiKey", polygonAPIKey)
 	endpoint := "https://api.massive.com/benzinga/v2/news?" + params.Encode()
-	resp, err := http.Get(endpoint)
+	type massiveBenzingaResp struct {
+		Results []map[string]interface{} `json:"results"`
+	}
+	resp, err := cachedJSONGet[massiveBenzingaResp](
+		jsonCachePath("massive_benzinga_news", strings.ToUpper(strings.TrimSpace(ticker)), dateStr),
+		endpoint,
+		60*time.Second,
+		dateScopedDataIsComplete(dateStr, time.Now()),
+	)
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("Massive Benzinga News: %s", resp.Status)
-	}
-	var pr struct {
-		Results []map[string]interface{} `json:"results"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&pr); err != nil {
-		return nil, err
-	}
-	return pr.Results, nil
+	return resp.Results, nil
 }
 
 func queryFMPNews(ticker, dateStr string) ([]map[string]interface{}, error) {
-	url := fmt.Sprintf("https://financialmodelingprep.com/api/v3/stock_news?tickers=%s&from=%s&to=%s&limit=50&apikey=%s",
+	ticker = strings.ToUpper(strings.TrimSpace(ticker))
+	endpoint := fmt.Sprintf("https://financialmodelingprep.com/api/v3/stock_news?tickers=%s&from=%s&to=%s&limit=50&apikey=%s",
 		ticker, dateStr, dateStr, fmpAPIKey)
-	resp, err := http.Get(url)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("FMP News: %s", resp.Status)
-	}
-	var news []map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&news); err != nil {
-		return nil, err
-	}
-	return news, nil
+	return cachedJSONGet[[]map[string]interface{}](
+		jsonCachePath("fmp_news", ticker, dateStr),
+		endpoint,
+		60*time.Second,
+		dateScopedDataIsComplete(dateStr, time.Now()),
+	)
 }
 
 func firstNonEmptyString(values map[string]interface{}, keys ...string) string {
@@ -783,6 +1064,7 @@ func filterTradeableNews(items []NewsItem) []NewsItem {
 }
 
 func querySECFilings(ticker, dateStr string) ([]map[string]interface{}, error) {
+	ticker = strings.ToUpper(strings.TrimSpace(ticker))
 	payload := map[string]interface{}{
 		"query": fmt.Sprintf("ticker:%s AND filedAt:[%s TO %s]", ticker, dateStr, dateStr),
 		"from":  "0",
@@ -793,27 +1075,21 @@ func querySECFilings(ticker, dateStr string) ([]map[string]interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequest("POST", "https://api.sec-api.io?token="+secAPIKey, bytes.NewBuffer(jsonPayload))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("SEC API: %s", resp.Status)
-	}
-	var result struct {
+	type secAPIResponse struct {
 		Filings []map[string]interface{} `json:"filings"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	resp, err := cachedJSONPost[secAPIResponse](
+		jsonCachePath("sec_filings", ticker, dateStr),
+		"https://api.sec-api.io?token="+secAPIKey,
+		jsonPayload,
+		map[string]string{"Content-Type": "application/json"},
+		60*time.Second,
+		dateScopedDataIsComplete(dateStr, time.Now()),
+	)
+	if err != nil {
 		return nil, err
 	}
-	return result.Filings, nil
+	return resp.Filings, nil
 }
 
 func nextDay(dateStr string) string {
@@ -1281,6 +1557,35 @@ func openChartHandler(w http.ResponseWriter, r *http.Request) {
 		params.Set("time", normTime)
 	}
 	http.Redirect(w, r, "/chart?"+params.Encode(), http.StatusFound)
+}
+
+func cycleCSVHandler(w http.ResponseWriter, r *http.Request) {
+	name := "polygon-charts-routine.csv"
+	if _, err := os.Stat(name); err != nil {
+		if !os.IsNotExist(err) {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		matches, err := filepath.Glob("polygon_charts_cycle_symbols_*.csv")
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if len(matches) == 0 {
+			http.Error(w, "no polygon-charts-routine.csv or polygon_charts_cycle_symbols_*.csv file found", http.StatusNotFound)
+			return
+		}
+		sort.Strings(matches)
+		name = matches[len(matches)-1]
+	}
+	data, err := os.ReadFile(name)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("X-Cycle-Csv-Filename", filepath.Base(name))
+	_, _ = w.Write(data)
 }
 
 func candlesHandler(w http.ResponseWriter, r *http.Request) {
@@ -2356,6 +2661,9 @@ func main() {
 	if listenPort == 0 {
 		listenPort = 8081
 	}
+	if err := ensureDataDir(); err != nil {
+		log.Printf("cache: cannot create %s: %v", dataDir, err)
+	}
 	http.HandleFunc("/", rootHandler)
 	http.HandleFunc("/api/candles", candlesHandler)
 	http.HandleFunc("/api/ticker-details", tickerDetailsHandler)
@@ -2366,6 +2674,7 @@ func main() {
 	http.HandleFunc("/chart", chartHandler)
 	http.HandleFunc("/api/open-chart", openChartHandler)
 	http.HandleFunc("/api/open-chart/", openChartHandler)
+	http.HandleFunc("/api/cycle-csv", cycleCSVHandler)
 	http.HandleFunc("/api/chart-data", chartDataHandler)
 	http.HandleFunc("/api/ntfy/publish", ntfyPublishHandler)
 	addr := fmt.Sprintf(":%d", listenPort)
