@@ -1763,6 +1763,7 @@ function applyMainStepData(visibleCount) {
   cciPlot.line.setData(cachedCci.filter(v => v.time <= cutoffTime));
   updateVwapSlopePanel("vwap-slope-panel", cachedVwap, cachedMinCandles, cutoffTime);
   updateCciPanel("cci-panel", cachedCci, cutoffTime, mainStepSignalSide);
+  updateGapIndicator(mainStepTicker, mainStepDate, shownCandles);
   updatePriceChangeIndicator(mainStepTicker, mainStepDate, shownCandles);
   if (cachedTpoCandles.length) {
     renderTpoCharts("tpo-chart-container", mainStepTicker, mainStepDate, cachedTpoCandles.filter(c => c.time <= cutoffTime));
@@ -3248,29 +3249,66 @@ function setPreviousCloseLine(price) {
   });
 }
 
-function updateGapIndicator(ticker, dateStr) {
+function getGapReferenceCandle(dateStr, shownCandles = null) {
+  const source = (Array.isArray(shownCandles) && shownCandles.length)
+    ? shownCandles
+    : (Array.isArray(cachedTpoCandles) && cachedTpoCandles.length)
+      ? cachedTpoCandles
+      : (Array.isArray(cachedMinCandles) && cachedMinCandles.length ? cachedMinCandles : cachedCandles);
+  const candles = (Array.isArray(source) ? source : [])
+    .filter(c => c && Number.isFinite(Number(c.time)) && Number.isFinite(Number(c.close)))
+    .sort((a, b) => Number(a.time) - Number(b.time));
+  if (!candles.length || !dateStr) return null;
+  const freezeTime = getNyTime(dateStr, 9, 30).getTime() / 1000;
+  let latestBeforeFreeze = null;
+  for (const candle of candles) {
+    const candleTime = Number(candle.time);
+    if (candleTime > freezeTime) break;
+    latestBeforeFreeze = candle;
+    if (candleTime === freezeTime && Number.isFinite(Number(candle.open))) {
+      return {
+        value: Number(candle.open),
+        time: candleTime,
+        label: "09:30 open"
+      };
+    }
+  }
+  if (!latestBeforeFreeze) return null;
+  const candleTime = Number(latestBeforeFreeze.time);
+  const isFrozen = candleTime >= freezeTime;
+  return {
+    value: isFrozen && Number.isFinite(Number(latestBeforeFreeze.open))
+      ? Number(latestBeforeFreeze.open)
+      : Number(latestBeforeFreeze.close),
+    time: candleTime,
+    label: isFrozen ? "09:30 open" : `${nyTime(candleTime)} close`
+  };
+}
+
+function updateGapIndicator(ticker, dateStr, shownCandles = null) {
   const panel = document.getElementById("main-gap-indicator");
   const stateEl = document.getElementById("main-gap-state");
   const valueEl = document.getElementById("main-gap-value");
   if (!panel || !stateEl || !valueEl) return;
   panel.classList.remove("is-up", "is-down", "is-flat");
   const priorClose = Number(getPriorClose(ticker, dateStr));
-  const openCandle = (Array.isArray(cachedMinCandles) && cachedMinCandles.length ? cachedMinCandles : cachedCandles)[0];
-  const sessionOpen = Number(openCandle?.open);
-  if (!Number.isFinite(priorClose) || priorClose <= 0 || !Number.isFinite(sessionOpen)) {
+  const reference = getGapReferenceCandle(dateStr, shownCandles);
+  const gapPrice = Number(reference?.value);
+  if (!Number.isFinite(priorClose) || priorClose <= 0 || !Number.isFinite(gapPrice)) {
     panel.classList.add("is-flat");
     stateEl.textContent = "Waiting";
     valueEl.textContent = "--";
+    valueEl.removeAttribute("title");
     clearPreviousCloseLine();
     return;
   }
-  const diff = sessionOpen - priorClose;
+  const diff = gapPrice - priorClose;
   const pct = (diff / priorClose) * 100;
   const direction = Math.abs(pct) < 0.05 ? "flat" : (pct > 0 ? "up" : "down");
   panel.classList.add(`is-${direction}`);
-  stateEl.textContent = direction === "flat" ? "Flat open" : `Gap ${direction}`;
+  stateEl.textContent = direction === "flat" ? "Flat gap" : `Gap ${direction}`;
   valueEl.textContent = `${formatGapPercent(pct)} / ${formatGapDollars(diff)}`;
-  valueEl.title = `Open ${dailyPivotFormatPrice(sessionOpen)} vs previous 4PM close ${dailyPivotFormatPrice(priorClose)}`;
+  valueEl.title = `${reference.label} ${dailyPivotFormatPrice(gapPrice)} vs previous 4PM close ${dailyPivotFormatPrice(priorClose)}`;
   setPreviousCloseLine(priorClose);
 }
 
