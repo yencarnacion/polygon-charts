@@ -36,6 +36,27 @@
         radial-gradient(circle at 88% 0%, rgba(31, 60, 105, 0.3), transparent 30%),
         var(--bg);
     }
+    .sma-reference-table {
+      width: auto;
+      margin: 0 0 0.5rem;
+      color: var(--text);
+      border-collapse: collapse;
+      font-size: 0.9rem;
+    }
+    .sma-reference-table th,
+    .sma-reference-table td {
+      padding: 0.25rem 0.6rem 0.25rem 0;
+      border: 0;
+      vertical-align: middle;
+      white-space: nowrap;
+    }
+    .sma-color-swatch {
+      display: inline-block;
+      width: 24px;
+      height: 4px;
+      border-radius: 999px;
+      vertical-align: middle;
+    }
     #signal-chart, #base-chart, #context-daily-chart, #context-intraday-chart {
       height: 600px;
       margin-bottom: 2rem;
@@ -1177,7 +1198,13 @@
       </div>
       <div class="row g-3">
         <div class="col-12 col-xl-6">
-          <h4>Daily Candles + Volume (Four Months Prior)</h4>
+          <h4>Daily Candles + Volume + 10/20 SMA (Four Months Prior)</h4>
+          <table class="sma-reference-table" aria-label="Daily SMA color reference">
+            <tbody>
+              <tr><th scope="row">10 SMA</th><td><span class="sma-color-swatch" style="background:#ff5d73"></span></td></tr>
+              <tr><th scope="row">20 SMA</th><td><span class="sma-color-swatch" style="background:#5fb3ff"></span></td></tr>
+            </tbody>
+          </table>
           <div id="context-daily-chart" class="border rounded"></div>
         </div>
         <div class="col-12 col-xl-6">
@@ -1250,7 +1277,7 @@ const SIGNAL_LIVE_STALE_MS = 90000;
 const SIGNAL_LIVE_EXTRA_POLL_MS = 15000;
 let contextListenersAdded = false;
 let contextLoaded = false;
-let contextDailyChart, contextDailyCandleSeries, contextDailyVolumeSeries;
+let contextDailyChart, contextDailyCandleSeries, contextDailyVolumeSeries, contextDailySma10Series, contextDailySma20Series;
 let contextIntradayChart, contextIntradayCandleSeries, contextIntradayVolumeSeries, contextIntradayVwapSeries;
 let contextIntradayDailyPivotPriceLines = [];
 let contextIntradayDailyPivotRenderToken = 0;
@@ -2845,6 +2872,12 @@ function initContextCharts() {
       color: '#67819f', priceFormat: { type: 'volume' },
       priceScaleId: 'vol', scaleMargins: { top: 0.75, bottom: 0 }
     });
+    contextDailySma10Series = contextDailyChart.addLineSeries({
+      color: '#ff5d73', lineWidth: 2, priceLineVisible: false
+    });
+    contextDailySma20Series = contextDailyChart.addLineSeries({
+      color: '#5fb3ff', lineWidth: 2, priceLineVisible: false
+    });
     contextDailyChart.priceScale('right').applyOptions({ scaleMargins: { top: 0.05, bottom: 0.35 } });
     contextDailyChart.priceScale('vol').applyOptions({ scaleMargins: { top: 0.75, bottom: 0 } });
   }
@@ -2962,6 +2995,30 @@ function buildContextIntradayVwap(candles, volumes, rawVwap) {
   return out;
 }
 
+function buildCloseSmaSeries(candles, period) {
+  if (!Array.isArray(candles) || period < 1) return [];
+  const out = [];
+  const window = [];
+  let sum = 0;
+  for (const c of candles) {
+    const close = Number(c?.close);
+    if (!Number.isFinite(close) || c?.time == null) {
+      window.length = 0;
+      sum = 0;
+      continue;
+    }
+    window.push(close);
+    sum += close;
+    if (window.length > period) {
+      sum -= window.shift();
+    }
+    if (window.length === period) {
+      out.push({ time: c.time, value: sum / period });
+    }
+  }
+  return out;
+}
+
 function normalizeHHMMClient(timeValue) {
   const raw = String(timeValue || '').trim().replace(':', '');
   if (!raw) return '';
@@ -3072,6 +3129,8 @@ async function loadContextTab() {
     const intraday = contextResp.data || {};
     contextDailyCandleSeries.setData(dailyWithPartial.candles);
     contextDailyVolumeSeries.setData(dailyWithPartial.volume);
+    contextDailySma10Series.setData(buildCloseSmaSeries(dailyWithPartial.candles, 10));
+    contextDailySma20Series.setData(buildCloseSmaSeries(dailyWithPartial.candles, 20));
 
     const intradayCandles = intraday.candles || [];
     const intradayVolume = intraday.volume || [];
