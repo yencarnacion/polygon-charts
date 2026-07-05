@@ -1242,7 +1242,7 @@ const ntfyTopic = {{NTFY_TOPIC_JSON}};
 const ntfyTagOptions = {{NTFY_TAG_OPTIONS_JSON}};
 // Signal Chart Logic
 let signalListenersAdded = false;
-let signalChart, signalCandleSeries, signalVolumeSeries, signalVwapSeries, signalSmaSeries, signalCciPlot;
+let signalChart, signalCandleSeries, signalVolumeSeries, signalVwapSeries, signalSmaSeries, signalMarkerSeries, signalCciPlot;
 let signalDailyPivotPriceLines = [];
 let signalDailyPivotRenderToken = 0;
 let signalMetricsTable, signalNewsTable, signalFilingsTable;
@@ -1707,6 +1707,21 @@ function initCciChart(containerId) {
   return { chart: cciChart, line };
 }
 
+function addTopMarkerSeries(chart) {
+  return chart.addCandlestickSeries({
+    upColor: 'rgba(0,0,0,0)',
+    downColor: 'rgba(0,0,0,0)',
+    borderUpColor: 'rgba(0,0,0,0)',
+    borderDownColor: 'rgba(0,0,0,0)',
+    wickUpColor: 'rgba(0,0,0,0)',
+    wickDownColor: 'rgba(0,0,0,0)',
+    borderVisible: false,
+    wickVisible: false,
+    lastValueVisible: false,
+    priceLineVisible: false
+  });
+}
+
 
 function initSignalChart() {
    signalChart = LightweightCharts.createChart(document.getElementById('signal-chart'),{
@@ -1728,6 +1743,7 @@ signalChart.timeScale().applyOptions({ tickMarkFormatter: nyTime }); // ★ axis
   signalChart.priceScale('vol').applyOptions({ scaleMargins: { top: 0.75, bottom: 0 } });
   signalVwapSeries = signalChart.addLineSeries({ color: '#ffd166', lineWidth: 2 });
   signalSmaSeries = signalChart.addLineSeries({ color: '#5fb3ff', lineWidth: 2 });
+  signalMarkerSeries = addTopMarkerSeries(signalChart);
   signalCciPlot = initCciChart('signal-cci-chart');
 }
 
@@ -2104,14 +2120,15 @@ function applySignalRevealData(visibleCount) {
   const cutoffTime = signalRevealCandles[nextCount - 1].time;
   setSignalAsOfTime(cutoffTime);
   signalCandleSeries.setData(signalRevealCandles.slice(0, nextCount));
+  signalMarkerSeries.setData(signalRevealCandles.slice(0, nextCount));
   signalVolumeSeries.setData(signalRevealVolume.filter(v => v.time <= cutoffTime));
   signalVwapSeries.setData(signalRevealVwap.filter(v => v.time <= cutoffTime));
   signalSmaSeries.setData(signalRevealSma.filter(v => v.time <= cutoffTime));
   signalCciPlot.line.setData(signalRevealCci.filter(v => v.time <= cutoffTime));
   if (signalMarker && signalMarker.time <= cutoffTime) {
-    signalCandleSeries.setMarkers([signalMarker]);
+    signalMarkerSeries.setMarkers([signalMarker]);
   } else {
-    signalCandleSeries.setMarkers([]);
+    signalMarkerSeries.setMarkers([]);
   }
   updateVwapSlopePanel('signal-vwap-slope-panel', signalRevealVwap, signalRevealSlopeCandles.length ? signalRevealSlopeCandles : signalRevealCandles, cutoffTime);
   updateCciPanel('signal-cci-panel', signalRevealCci, cutoffTime, signal);
@@ -2652,6 +2669,7 @@ function applySignalChartPayload(data) {
   const tpoChartMinCandles = Array.isArray(data.minCandles) ? data.minCandles.map(c => ({ ...c })) : [];
   const slopeCandles = tpoChartMinCandles.length ? tpoChartMinCandles : plottedCandles;
   signalCandleSeries.setData(plottedCandles);
+  signalMarkerSeries.setData(plottedCandles);
   signalVolumeSeries.setData(plottedVolume);
   signalVwapSeries.setData(plottedVwap);
   signalSmaSeries.setData(plottedSma);
@@ -2666,6 +2684,8 @@ function applySignalChartPayload(data) {
   signalTpoChartMinuteCandles = tpoChartMinCandles.map(c => ({ ...c }));
   signalVisibleCandles = 0;
   signalMarker = null;
+  signalCandleSeries.setMarkers([]);
+  signalMarkerSeries.setMarkers([]);
   signalImplicitLatestMode = false;
   setSignalAsOfTime(hasSignalTime && timeStr ? combineDateAndTime(date, timeStr) / 1000 : null);
   updateSignalStepControls();
@@ -2674,20 +2694,8 @@ function applySignalChartPayload(data) {
   if (hasSignalTime) {
     const hhmm = String(timeStr).replace(':','').padStart(4,'0');
     const ts = combineDateAndTime(date, hhmm) / 1000;
-    const isBuy = signal === "buy";
-    if (hhmm === '0930') {
-      signalMarker = null;
-      signalCandleSeries.setMarkers([]);
-    } else {
-      signalMarker = {
-        time: ts,
-        position: isBuy ? "belowBar" : "aboveBar",
-        shape: isBuy ? "arrowUp" : "arrowDown",
-        color: isBuy ? "#21c58f" : "#ff8a5a",
-        size: 2
-      };
-      signalCandleSeries.setMarkers([signalMarker]);
-    }
+    signalMarker = signalMarkerForCandles(plottedCandles, ts, signal);
+    signalMarkerSeries.setMarkers(signalMarker ? [signalMarker] : []);
     if (plottedCandles.length > 0) {
       let initialCount = plottedCandles.filter(c => c.time <= ts).length;
       if (initialCount < 1) initialCount = 1;
@@ -2701,7 +2709,7 @@ function applySignalChartPayload(data) {
       applySignalRevealData(initialCount);
     }
   } else if (date === currentNyDateString() && plottedCandles.length > 0) {
-    signalCandleSeries.setMarkers([]);
+    signalMarkerSeries.setMarkers([]);
     let latestCount = completedSignalCandleCount(plottedCandles);
     if (latestCount < 1) latestCount = plottedCandles.length;
     latestCount = Math.min(latestCount, plottedCandles.length);
@@ -2718,7 +2726,7 @@ function applySignalChartPayload(data) {
     const statusTime = Number.isFinite(Number(cutoff)) ? nyTime(Number(cutoff)) : "latest candle";
     setSignalLiveStatus(isSignalDataSessionOpen() ? `As of ${statusTime}. Waiting for ${signalNextLiveTimeLabel()}...` : `As of ${statusTime}.`);
   } else {
-    signalCandleSeries.setMarkers([]);
+    signalMarkerSeries.setMarkers([]);
     const last = plottedCandles[plottedCandles.length - 1];
     setSignalAsOfTime(last?.time ?? null);
   }
@@ -2732,6 +2740,9 @@ function applySignalChartPayload(data) {
   }
   signalChart.resize(document.getElementById('signal-chart').clientWidth, 600);
   signalCciPlot.chart.resize(document.getElementById('signal-cci-chart').clientWidth, 154);
+  if (signalMarker) {
+    signalMarkerSeries.setMarkers([signalMarker]);
+  }
 }
 
 async function loadSignalPrimaryChart() {
@@ -2832,6 +2843,54 @@ function combineDateAndTime(dateStr, HHMM) {
   const s = String(HHMM).replace(':','').padStart(4,'0');
   const h = Number(s.slice(0, 2)), m = Number(s.slice(2,4));
   return getNyTime(dateStr, h, m).getTime();
+}
+
+function inferCandleIntervalSeconds(candles) {
+  if (!Array.isArray(candles) || candles.length < 2) return 60;
+  const intervals = [];
+  let prev = null;
+  for (const candle of candles) {
+    const t = Number(candle?.time);
+    if (!Number.isFinite(t)) continue;
+    if (prev !== null) {
+      const diff = t - prev;
+      if (diff > 0 && diff <= 3600) intervals.push(diff);
+    }
+    prev = t;
+  }
+  if (!intervals.length) return 60;
+  intervals.sort((a, b) => a - b);
+  return intervals[Math.floor(intervals.length / 2)] || 60;
+}
+
+function markerTimeForCandles(targetTime, candles) {
+  const target = Number(targetTime);
+  if (!Number.isFinite(target)) return null;
+  if (!Array.isArray(candles) || candles.length === 0) return null;
+  const interval = inferCandleIntervalSeconds(candles);
+  let firstAfter = null;
+  let lastBefore = null;
+  for (const candle of candles) {
+    const start = Number(candle?.time);
+    if (!Number.isFinite(start)) continue;
+    if (start <= target && target < start + interval) return start;
+    if (start >= target && firstAfter === null) firstAfter = start;
+    if (start < target) lastBefore = start;
+  }
+  return firstAfter ?? lastBefore;
+}
+
+function signalMarkerForCandles(candles, targetTime, signalSide) {
+  const markerTime = markerTimeForCandles(targetTime, candles);
+  if (markerTime === null) return null;
+  const isBuy = String(signalSide || "").toLowerCase() === "buy";
+  return {
+    time: markerTime,
+    position: isBuy ? "belowBar" : "aboveBar",
+    shape: isBuy ? "arrowUp" : "arrowDown",
+    color: isBuy ? "#21c58f" : "#ff8a5a",
+    size: 2
+  };
 }
 
 function formatIsoDate(dateObj) {
@@ -3202,10 +3261,11 @@ async function loadContextTab() {
 // Base Chart Logic
 let baseListenersAdded = false;
 let baseCsvData = [], baseCurrentRow = 0, baseIsCsvUploaded = false;
-let baseChart, baseCandleSeries, baseVolumeSeries, baseVwapSeries, baseSmaSeries, baseCciPlot;
+let baseChart, baseCandleSeries, baseVolumeSeries, baseVwapSeries, baseSmaSeries, baseMarkerSeries, baseCciPlot;
 let baseCachedCandles = [], baseCachedVolume = [], baseCachedMinCandles = [], baseCachedMinVolume = [];
 let baseCachedVwap = [];
 let baseCachedCci = [];
+let baseMarker = null;
 let baseDailyPivotPriceLines = [];
 let baseDailyPivotRenderToken = 0;
 let basePriorDayCloses = {}, basePriorDayVolumes = {}, basePriorDayDates = {};
@@ -3232,6 +3292,7 @@ baseChart.timeScale().applyOptions({ tickMarkFormatter: nyTime }); // ★ axis t
   baseChart.priceScale('vol').applyOptions({ scaleMargins: { top: 0.75, bottom: 0 } });
   baseVwapSeries = baseChart.addLineSeries({ color: '#ffd166', lineWidth: 2 });
   baseSmaSeries = baseChart.addLineSeries({ color: '#5fb3ff', lineWidth: 2 });
+  baseMarkerSeries = addTopMarkerSeries(baseChart);
   baseCciPlot = initCciChart('base-cci-chart');
 }
 
@@ -4192,13 +4253,16 @@ async function loadBaseChart(e, skipDefaultRow = false) {
     baseCachedVwap = data.vwap;
     baseCachedCci = data.cci;
     baseCandleSeries.setData(data.candles);
+    baseMarkerSeries.setData(data.candles);
     baseVolumeSeries.setData(data.volume);
     baseVwapSeries.setData(data.vwap);
     baseSmaSeries.setData(data.sma);
     baseCciPlot.line.setData(data.cci);
     updateVwapSlopePanel('base-vwap-slope-panel', baseCachedVwap, baseCachedMinCandles);
     updateCciPanel('base-cci-panel', baseCachedCci);
+    baseMarker = null;
     baseCandleSeries.setMarkers([]);
+    baseMarkerSeries.setMarkers([]);
     setSessionVisibleRange(baseChart, baseDate);
     setSessionVisibleRange(baseCciPlot.chart, baseDate);
     drawRthOpenLine(baseChart, document.getElementById('base-chart'), baseDate);
@@ -4216,6 +4280,7 @@ async function loadBaseChart(e, skipDefaultRow = false) {
     if (baseCsvData.length === 0 && !skipDefaultRow) {
       if (baseCachedMinCandles.length === 0) {
         baseCandleSeries.setData([]);
+        baseMarkerSeries.setData([]);
         baseVolumeSeries.setData([]);
         baseVwapSeries.setData([]);
         baseSmaSeries.setData([]);
@@ -4244,11 +4309,10 @@ async function loadBaseChart(e, skipDefaultRow = false) {
       }));
       cols.unshift({ title: "#", formatter: "rownum", hozAlign: "center", width: 40, frozen: true });
       baseTable.setColumns(cols);
-      baseTable.setData(baseCsvData).then(() => {
-        baseCurrentRow = 0;
-        updateBaseTableView();
-        showBaseSignalOnChart(baseCsvData[baseCurrentRow]);
-      });
+      await baseTable.setData(baseCsvData);
+      baseCurrentRow = 0;
+      updateBaseTableView();
+      await showBaseSignalOnChart(baseCsvData[baseCurrentRow]);
     } else if (baseCsvData.length > 0) {
       if (baseCurrentRow < 0 || baseCurrentRow >= baseCsvData.length) {
         baseCurrentRow = 0;
@@ -4259,6 +4323,9 @@ async function loadBaseChart(e, skipDefaultRow = false) {
     // Resize chart after data is loaded
     baseChart.resize(document.getElementById('base-chart').clientWidth, 600);
     baseCciPlot.chart.resize(document.getElementById('base-cci-chart').clientWidth, 154);
+    if (baseMarker) {
+      baseMarkerSeries.setMarkers([baseMarker]);
+    }
   } catch (err) {
     console.error('[baseLoad] error', err);
     alert('Error: ' + (err.response?.data || err));
@@ -4427,17 +4494,13 @@ async function showBaseSignalOnChart(row) {
   const ts = combineDateAndTime(date, hhmm);
   updateVwapSlopePanel('base-vwap-slope-panel', baseCachedVwap, baseCachedMinCandles, ts / 1000);
   updateCciPanel('base-cci-panel', baseCachedCci, ts / 1000, row.signal);
-  const isBuy = row.signal.toLowerCase() === "buy";
-  if (hhmm === '0930') {
-    baseCandleSeries.setMarkers([]);
+  const isDefaultOpenPlaceholder = !hasSignalTime && !baseIsCsvUploaded && hhmm === '0930';
+  if (isDefaultOpenPlaceholder) {
+    baseMarker = null;
+    baseMarkerSeries.setMarkers([]);
   } else {
-    baseCandleSeries.setMarkers([{
-	      time: ts / 1000,
-	      position: isBuy ? "belowBar" : "aboveBar",
-	      shape: isBuy ? "arrowUp" : "arrowDown",
-	      color: isBuy ? "#21c58f" : "#ff8a5a",
-	      size: 2
-	    }]);
+    baseMarker = signalMarkerForCandles(baseCachedCandles, ts / 1000, row.signal);
+    baseMarkerSeries.setMarkers(baseMarker ? [baseMarker] : []);
   }
 }
 
