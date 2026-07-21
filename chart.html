@@ -2139,8 +2139,9 @@ function applySignalRevealData(visibleCount) {
 
 async function updateSignalTpoChart(cutoffTime = null) {
   const token = ++signalTpoChartRenderToken;
-  const sourceCandles = (hasSignalTime || signalImplicitLatestMode) && Number.isFinite(Number(cutoffTime))
-    ? signalTpoChartMinuteCandles.filter(c => c.time <= cutoffTime)
+  const hasCutoff = cutoffTime !== null && cutoffTime !== "" && Number.isFinite(Number(cutoffTime));
+  const sourceCandles = (hasSignalTime || signalImplicitLatestMode) && hasCutoff
+    ? signalTpoChartMinuteCandles.filter(c => c.time <= Number(cutoffTime))
     : null;
   await renderTpoCharts('signal-tpo-chart-container', ticker, date, sourceCandles, () => token !== signalTpoChartRenderToken);
 }
