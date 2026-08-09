@@ -1068,6 +1068,7 @@
       <div id="signal-step-controls" class="signal-step-controls">
         <button id="signal-live-alert" class="signal-live-alert" type="button" hidden>New catalyst</button>
         <button id="signal-next-candle" class="btn btn-primary" type="button" disabled>Next candle</button>
+        <button id="signal-reset-candles" class="btn btn-outline-light" type="button" disabled title="Return to the candles shown when this tab opened" aria-label="Reset chart to its initial candles">↻ Reset</button>
         <button id="signal-live-step" class="btn btn-outline-light" type="button" disabled>Live Step: OFF</button>
         <span id="signal-live-countdown" class="signal-live-countdown" aria-live="polite">T-00:00</span>
         <span id="signal-live-status" class="signal-live-status">Manual replay</span>
@@ -1259,6 +1260,7 @@ let signalRevealSlopeCandles = [];
 let signalTpoChartMinuteCandles = [];
 let signalTpoChartRenderToken = 0;
 let signalVisibleCandles = 0;
+let signalInitialVisibleCandles = 0;
 let signalMarker = null;
 let signalLiveStepEnabled = false;
 let signalLiveStepTimer = null;
@@ -2149,6 +2151,7 @@ async function updateSignalTpoChart(cutoffTime = null) {
 function updateSignalStepControls() {
   const controls = document.getElementById('signal-step-controls');
   const button = document.getElementById('signal-next-candle');
+  const resetButton = document.getElementById('signal-reset-candles');
   const liveButton = document.getElementById('signal-live-step');
   if (!controls || !button) return;
   const canShow = signalStepModeEnabled && signalRevealCandles.length > 0 && isSignalTabActive();
@@ -2156,6 +2159,9 @@ function updateSignalStepControls() {
   const canAdvance = canShow && (signalVisibleCandles < signalRevealCandles.length || canPollForNext);
   controls.classList.toggle('is-visible', canShow);
   button.disabled = !canAdvance;
+  if (resetButton) {
+    resetButton.disabled = !canShow || signalInitialVisibleCandles < 1 || signalVisibleCandles === signalInitialVisibleCandles;
+  }
   if (liveButton) {
     liveButton.disabled = !canShow || timeframe !== "1m";
     liveButton.classList.toggle('is-active', signalLiveStepEnabled);
@@ -2165,6 +2171,16 @@ function updateSignalStepControls() {
     stopSignalLiveStep("Live Step unavailable.");
   }
   updateSignalLiveCountdown();
+}
+
+function resetSignalCandles() {
+  if (!signalStepModeEnabled || signalInitialVisibleCandles < 1 || !isSignalTabActive()) return;
+  stopSignalLiveStep("Manual replay");
+  applySignalRevealData(signalInitialVisibleCandles);
+  setSessionVisibleRange(signalChart, date);
+  setSessionVisibleRange(signalCciPlot.chart, date);
+  const cutoff = signalCurrentCutoffTime();
+  setSignalLiveStatus(Number.isFinite(Number(cutoff)) ? `Reset to ${nyTime(Number(cutoff))}.` : "Reset to initial chart.");
 }
 
 async function advanceSignalCandle() {
@@ -2611,6 +2627,9 @@ function setupSignalListeners() {
   document.getElementById('signal-next-candle').addEventListener('click', () => {
     advanceSignalCandle();
   });
+  document.getElementById('signal-reset-candles').addEventListener('click', () => {
+    resetSignalCandles();
+  });
   document.getElementById('signal-live-step').addEventListener('click', () => {
     toggleSignalLiveStep();
   });
@@ -2684,6 +2703,7 @@ function applySignalChartPayload(data) {
   signalRevealSlopeCandles = [];
   signalTpoChartMinuteCandles = tpoChartMinCandles.map(c => ({ ...c }));
   signalVisibleCandles = 0;
+  signalInitialVisibleCandles = 0;
   signalMarker = null;
   signalCandleSeries.setMarkers([]);
   signalMarkerSeries.setMarkers([]);
@@ -2707,6 +2727,7 @@ function applySignalChartPayload(data) {
       signalRevealSma = plottedSma;
       signalRevealCci = plottedCci;
       signalRevealSlopeCandles = slopeCandles;
+      signalInitialVisibleCandles = initialCount;
       applySignalRevealData(initialCount);
     }
   } else if (date === currentNyDateString() && plottedCandles.length > 0) {
@@ -2722,6 +2743,7 @@ function applySignalChartPayload(data) {
     signalRevealSma = plottedSma;
     signalRevealCci = plottedCci;
     signalRevealSlopeCandles = slopeCandles;
+    signalInitialVisibleCandles = latestCount;
     applySignalRevealData(latestCount);
     const cutoff = signalCurrentCutoffTime();
     const statusTime = Number.isFinite(Number(cutoff)) ? nyTime(Number(cutoff)) : "latest candle";

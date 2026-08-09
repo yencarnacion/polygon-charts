@@ -78,6 +78,9 @@ Query-style:
 
 - With only `ticker` + `date`, the chart opens for the full day.
 - If `time` is provided, the chart opens with the signal marker at that time.
+- Timed and current-day charts expose `Next candle` for review; `↻ Reset`
+  returns the tab to the candle cutoff it had when it first opened, including
+  its as-of indicators, catalysts, filings, and TPO view.
 - If `signal` is not provided, it defaults to `buy`.
 
 ### Examples
