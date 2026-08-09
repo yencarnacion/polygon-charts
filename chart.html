@@ -872,9 +872,9 @@
       top: 0;
       bottom: 0;
       width: 0;
-      border-left: 2px dashed var(--warning);
+      border-left: 1px dashed var(--warning);
       pointer-events: none;
-      opacity: 0.9;
+      opacity: 0.72;
       z-index: 2;
     }
     .rth-label {
@@ -4113,7 +4113,10 @@ function drawRthOpenLine(chart, containerEl, dateStr) {
         line.style.display = 'none'; label.style.display = 'none'; return;
       }
       line.style.display = 'block'; label.style.display = 'block';
-      const px = Math.round(x);
+      // Mark the start of the 09:30 bar instead of drawing through its wick.
+      // barSpacing tracks zoom, so the guide stays on the candle's leading edge.
+      const barSpacing = Number(chart.timeScale().options().barSpacing);
+      const px = Math.round(x - (Number.isFinite(barSpacing) ? barSpacing / 2 : 0));
       line.style.left = px + 'px';
       label.style.left = px + 'px';
     };
