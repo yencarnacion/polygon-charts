@@ -42,6 +42,25 @@ ntfy:
     - flush base
 ```
 
+## Optional Symbol Action
+
+Polygon Charts can show a generic action beside `Push to ntfy` that sends the
+current chart symbol to another local tool. It is disabled unless configured:
+
+```bash
+SYMBOL_ACTION_URL=http://127.0.0.1:8090/api/symbol
+SYMBOL_ACTION_LABEL="Send symbol"
+```
+
+The receiver gets `POST` JSON in the portable form `{"symbol":"AAPL"}`. The
+browser calls Polygon Charts on the same origin; the Go server forwards the
+request with a short timeout, avoiding cross-origin setup in local receivers.
+This hook is intentionally tool-agnostic so dashboards, journals, scanners,
+and other local workflows can use it without application-specific coupling.
+
+Candlestick charts also show a high-contrast OHLCV readout when the pointer is
+over a candle.
+
 ## URL API For Deep Links
 
 You can open a chart directly from a clickable URL using ticker/date, with optional time.

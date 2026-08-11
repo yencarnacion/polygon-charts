@@ -4,6 +4,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	_ "embed"
 	"encoding/json"
 	"flag"
@@ -16,6 +17,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -32,18 +34,22 @@ var (
 	portFlag   = flag.Int("port", 0, "HTTP port (overrides .env)")
 )
 
+var tickerPattern = regexp.MustCompile(`^[A-Z][A-Z0-9.-]{0,15}$`)
+
 var (
-	polygonAPIKey    string
-	fmpAPIKey        string
-	secAPIKey        string
-	marketauxAPIKey  string
-	marketauxEnabled bool
-	patternfolioURL  string
-	ntfyEnabled      bool
-	ntfyServer       string
-	ntfyTopic        string
-	ntfyTagOptions   []string
-	listenPort       int
+	polygonAPIKey     string
+	fmpAPIKey         string
+	secAPIKey         string
+	marketauxAPIKey   string
+	marketauxEnabled  bool
+	patternfolioURL   string
+	ntfyEnabled       bool
+	ntfyServer        string
+	ntfyTopic         string
+	ntfyTagOptions    []string
+	symbolActionURL   string
+	symbolActionLabel string
+	listenPort        int
 )
 
 var defaultNtfyTagOptions = []string{
@@ -1258,6 +1264,13 @@ func ntfyEnabledClass() string {
 	return "d-none"
 }
 
+func symbolActionEnabledClass() string {
+	if symbolActionURL != "" {
+		return ""
+	}
+	return "d-none"
+}
+
 func applySharedTemplateVars(html string) string {
 	html = strings.ReplaceAll(html, "{{PATTERNFOLIO_URL}}", patternfolioURL)
 	html = strings.ReplaceAll(html, "{{MARKETAUX_ENABLED}}", strconv.FormatBool(marketauxEnabled))
@@ -1266,7 +1279,63 @@ func applySharedTemplateVars(html string) string {
 	html = strings.ReplaceAll(html, "{{NTFY_TOPIC_JSON}}", jsValue(ntfyTopic))
 	html = strings.ReplaceAll(html, "{{NTFY_TAG_OPTIONS_JSON}}", jsValue(ntfyTagOptions))
 	html = strings.ReplaceAll(html, "{{NTFY_ENABLED_CLASS}}", ntfyEnabledClass())
+	html = strings.ReplaceAll(html, "{{SYMBOL_ACTION_ENABLED}}", strconv.FormatBool(symbolActionURL != ""))
+	html = strings.ReplaceAll(html, "{{SYMBOL_ACTION_LABEL}}", symbolActionLabel)
+	html = strings.ReplaceAll(html, "{{SYMBOL_ACTION_ENABLED_CLASS}}", symbolActionEnabledClass())
 	return html
+}
+
+func symbolActionHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if symbolActionURL == "" {
+		http.Error(w, "symbol action is not configured", http.StatusNotFound)
+		return
+	}
+	var request struct {
+		Symbol string `json:"symbol"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&request); err != nil {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+	request.Symbol = strings.ToUpper(strings.TrimSpace(request.Symbol))
+	if !tickerPattern.MatchString(request.Symbol) {
+		http.Error(w, "invalid symbol", http.StatusBadRequest)
+		return
+	}
+	body, _ := json.Marshal(request)
+	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+	defer cancel()
+	upstream, err := http.NewRequestWithContext(ctx, http.MethodPost, symbolActionURL, bytes.NewReader(body))
+	if err != nil {
+		http.Error(w, "symbol action is unavailable", http.StatusBadGateway)
+		return
+	}
+	upstream.Header.Set("Content-Type", "application/json")
+	response, err := http.DefaultClient.Do(upstream)
+	if err != nil {
+		http.Error(w, "symbol action is unavailable", http.StatusBadGateway)
+		return
+	}
+	defer response.Body.Close()
+	responseBody, err := io.ReadAll(io.LimitReader(response.Body, 64<<10))
+	if err != nil {
+		http.Error(w, "symbol action returned an invalid response", http.StatusBadGateway)
+		return
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		http.Error(w, strings.TrimSpace(string(responseBody)), http.StatusBadGateway)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if len(responseBody) == 0 {
+		responseBody = []byte(`{"ok":true}`)
+	}
+	_, _ = w.Write(responseBody)
 }
 
 func normalizePageURL(raw string) (string, error) {
@@ -2732,6 +2801,11 @@ func main() {
 	if len(ntfyTagOptions) == 0 {
 		ntfyTagOptions = append([]string(nil), defaultNtfyTagOptions...)
 	}
+	symbolActionURL = strings.TrimSpace(os.Getenv("SYMBOL_ACTION_URL"))
+	symbolActionLabel = strings.TrimSpace(os.Getenv("SYMBOL_ACTION_LABEL"))
+	if symbolActionLabel == "" {
+		symbolActionLabel = "Send symbol"
+	}
 	patternfolioURL = os.Getenv("PATTERNFOLIO_URL")
 	if patternfolioURL == "" {
 		patternfolioURL = "http://localhost:8082"
@@ -2762,6 +2836,7 @@ func main() {
 	http.HandleFunc("/api/local-csv", localCSVHandler)
 	http.HandleFunc("/api/chart-data", chartDataHandler)
 	http.HandleFunc("/api/ntfy/publish", ntfyPublishHandler)
+	http.HandleFunc("/api/symbol-action", symbolActionHandler)
 	addr := fmt.Sprintf(":%d", listenPort)
 	go func() {
 		time.Sleep(500 * time.Millisecond)

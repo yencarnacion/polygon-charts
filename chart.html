@@ -897,6 +897,32 @@
       flex-wrap: wrap;
       margin-top: 0.75rem;
     }
+    .symbol-action-feedback {
+      color: var(--muted);
+      font-size: 0.92rem;
+    }
+    .symbol-action-feedback.is-error { color: #ff9f80; }
+    .symbol-action-feedback.is-success { color: #7fe0b2; }
+    .ohlcv-readout {
+      position: absolute;
+      top: 10px;
+      left: 12px;
+      z-index: 5;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.35rem 0.9rem;
+      max-width: calc(100% - 24px);
+      padding: 0.45rem 0.65rem;
+      border: 1px solid rgba(140, 160, 188, 0.42);
+      border-radius: 7px;
+      background: rgba(7, 14, 24, 0.9);
+      color: #d7e4f4;
+      font: 700 0.9rem/1.25 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      pointer-events: none;
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.28);
+    }
+    .ohlcv-readout .ohlcv-time { color: #a9bdd5; }
+    .ohlcv-readout b { color: #7fbfff; }
     .ntfy-feedback {
       color: var(--muted);
       font-size: 0.92rem;
@@ -1001,6 +1027,8 @@
         <div class="signal-action-row">
           <button class="btn btn-primary" type="button" onclick="postToPatternfolio()">Post to Patternfolio</button>
           <button id="toggleNtfyComposer" class="btn btn-outline-light {{NTFY_ENABLED_CLASS}}" type="button">Push to ntfy</button>
+          <button id="runSymbolAction" class="btn btn-outline-info {{SYMBOL_ACTION_ENABLED_CLASS}}" type="button">{{SYMBOL_ACTION_LABEL}}</button>
+          <span id="symbolActionFeedback" class="symbol-action-feedback {{SYMBOL_ACTION_ENABLED_CLASS}}" aria-live="polite"></span>
           <span id="ntfyFeedback" class="ntfy-feedback {{NTFY_ENABLED_CLASS}}" aria-live="polite"></span>
         </div>
         <div id="ntfyComposer" class="ntfy-composer {{NTFY_ENABLED_CLASS}}" hidden>
@@ -1243,6 +1271,7 @@ const ntfyEnabled = {{NTFY_ENABLED}};
 const ntfyServer = {{NTFY_SERVER_JSON}};
 const ntfyTopic = {{NTFY_TOPIC_JSON}};
 const ntfyTagOptions = {{NTFY_TAG_OPTIONS_JSON}};
+const symbolActionEnabled = {{SYMBOL_ACTION_ENABLED}};
 // Signal Chart Logic
 let signalListenersAdded = false;
 let signalChart, signalCandleSeries, signalVolumeSeries, signalVwapSeries, signalSmaSeries, signalMarkerSeries, signalCciPlot;
@@ -1287,6 +1316,7 @@ let contextIntradayDailyPivotPriceLines = [];
 let contextIntradayDailyPivotRenderToken = 0;
 let contextNews = [], contextFilings = [];
 let ntfyIsSending = false;
+let symbolActionIsSending = false;
 const radarTables = {};
 
 function removeMarketauxSections() {
@@ -1430,6 +1460,52 @@ function initNtfyComposer() {
         composer.hidden = true;
       }
     }
+  });
+}
+
+function setSymbolActionFeedback(message, kind = '') {
+  const feedback = document.getElementById('symbolActionFeedback');
+  if (!feedback) return;
+  feedback.textContent = message;
+  feedback.classList.toggle('is-error', kind === 'error');
+  feedback.classList.toggle('is-success', kind === 'success');
+}
+
+async function runSymbolAction() {
+  if (!symbolActionEnabled || symbolActionIsSending) return;
+  const button = document.getElementById('runSymbolAction');
+  symbolActionIsSending = true;
+  if (button) button.disabled = true;
+  setSymbolActionFeedback(`Sending {{TICKER}}…`);
+  try {
+    await axios.post('/api/symbol-action', { symbol: '{{TICKER}}' }, { timeout: 5000 });
+    setSymbolActionFeedback('{{TICKER}} sent', 'success');
+  } catch (err) {
+    const message = String(err.response?.data || err.message || 'Action unavailable').trim();
+    setSymbolActionFeedback(message, 'error');
+  } finally {
+    symbolActionIsSending = false;
+    if (button) button.disabled = false;
+  }
+}
+
+function attachOhlcvReadout(chart, candleSeries, volumeSeries, container) {
+  if (!chart || !container || container.querySelector('.ohlcv-readout')) return;
+  container.style.position = 'relative';
+  const readout = document.createElement('div');
+  readout.className = 'ohlcv-readout';
+  readout.textContent = 'Hover a candle for OHLCV';
+  container.appendChild(readout);
+  const number = value => Number(value).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+  const volume = value => Number(value).toLocaleString('en-US', { maximumFractionDigits: 0 });
+  chart.subscribeCrosshairMove(param => {
+    const candle = param?.seriesData?.get(candleSeries);
+    if (!candle || !Number.isFinite(Number(candle.open))) {
+      readout.textContent = 'Hover a candle for OHLCV';
+      return;
+    }
+    const volumePoint = param.seriesData.get(volumeSeries);
+    readout.innerHTML = `<span class="ohlcv-time">${nyTime(Number(param.time))}</span><span><b>O</b> ${number(candle.open)}</span><span><b>H</b> ${number(candle.high)}</span><span><b>L</b> ${number(candle.low)}</span><span><b>C</b> ${number(candle.close)}</span><span><b>V</b> ${volume(volumePoint?.value || 0)}</span>`;
   });
 }
 
@@ -1749,6 +1825,7 @@ signalChart.timeScale().applyOptions({ tickMarkFormatter: nyTime }); // ★ axis
   signalSmaSeries = signalChart.addLineSeries({ color: '#5fb3ff', lineWidth: 2 });
   signalMarkerSeries = addTopMarkerSeries(signalChart);
   signalCciPlot = initCciChart('signal-cci-chart');
+  attachOhlcvReadout(signalChart, signalCandleSeries, signalVolumeSeries, document.getElementById('signal-chart'));
 }
 
 function hasTypingFocus() {
@@ -2964,6 +3041,7 @@ function initContextCharts() {
     });
     contextDailyChart.priceScale('right').applyOptions({ scaleMargins: { top: 0.05, bottom: 0.35 } });
     contextDailyChart.priceScale('vol').applyOptions({ scaleMargins: { top: 0.75, bottom: 0 } });
+    attachOhlcvReadout(contextDailyChart, contextDailyCandleSeries, contextDailyVolumeSeries, document.getElementById('context-daily-chart'));
   }
   if (!contextIntradayChart) {
     contextIntradayChart = LightweightCharts.createChart(document.getElementById('context-intraday-chart'), {
@@ -2984,6 +3062,7 @@ function initContextCharts() {
     contextIntradayChart.priceScale('right').applyOptions({ scaleMargins: { top: 0.03, bottom: 0.25 } });
     contextIntradayChart.priceScale('vol').applyOptions({ scaleMargins: { top: 0.78, bottom: 0 } });
     contextIntradayVwapSeries = contextIntradayChart.addLineSeries({ color: '#ffd166', lineWidth: 2 });
+    attachOhlcvReadout(contextIntradayChart, contextIntradayCandleSeries, contextIntradayVolumeSeries, document.getElementById('context-intraday-chart'));
   }
 }
 
@@ -3319,6 +3398,7 @@ baseChart.timeScale().applyOptions({ tickMarkFormatter: nyTime }); // ★ axis t
   baseSmaSeries = baseChart.addLineSeries({ color: '#5fb3ff', lineWidth: 2 });
   baseMarkerSeries = addTopMarkerSeries(baseChart);
   baseCciPlot = initCciChart('base-cci-chart');
+  attachOhlcvReadout(baseChart, baseCandleSeries, baseVolumeSeries, document.getElementById('base-chart'));
 }
 
 const nyFormatter = new Intl.DateTimeFormat('en-CA', {
@@ -4862,6 +4942,7 @@ document.getElementById('context-tab').addEventListener('shown.bs.tab', () => {
 
 // Initialize Signal Chart
 initNtfyComposer();
+document.getElementById('runSymbolAction')?.addEventListener('click', runSymbolAction);
 loadSignalChart();
 
 async function postToPatternfolio() {
