@@ -61,6 +61,39 @@ and other local workflows can use it without application-specific coupling.
 Candlestick charts also show a high-contrast OHLCV readout when the pointer is
 over a candle.
 
+## Optional TradingView Desktop Integration
+
+The same symbol-action button can also change the active chart in a locally
+running TradingView Desktop app. This is useful when the generic action is
+labeled **Load in Tape + Trading**: one click can keep its existing Tape/Yamir
+Trading Tools behavior while independently updating TradingView.
+
+Enable the integration in `.env`:
+
+```dotenv
+POLYGON_CHARTS_TRADINGVIEW_ENABLED=true
+POLYGON_CHARTS_TRADINGVIEW_CDP_URL=http://127.0.0.1:9222
+POLYGON_CHARTS_TRADINGVIEW_TIMEOUT=3s
+```
+
+Start one shared debug-enabled TradingView instance before Polygon Charts:
+
+```bash
+./scripts/launch-tradingview-debug-mac.sh
+```
+
+The implementation is native Go and does not require Node.js or a separately
+running MCP server. The existing `/api/symbol-action` request and the new
+TradingView request are independent, so either destination can be offline
+without blocking the other. A single TradingView instance can be shared with
+Watchlist Tool, DaiDai, Yamir Trading Tools, and other local applications.
+
+The feature is disabled by default because this repository is public. It accepts
+only loopback CDP addresses and refuses remote TradingView-control requests.
+Full macOS setup, direct tests, multi-tool operation, and troubleshooting are in
+[`docs/TRADINGVIEW_DESKTOP_INTEGRATION.md`](docs/TRADINGVIEW_DESKTOP_INTEGRATION.md).
+Third-party attribution is in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
+
 ## URL API For Deep Links
 
 You can open a chart directly from a clickable URL using ticker/date, with optional time.
