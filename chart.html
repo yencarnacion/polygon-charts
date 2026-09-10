@@ -1002,6 +1002,8 @@
       font-size: 0.84rem;
     }
   </style>
+<link rel="stylesheet" href="/assets/catalyst-ui.css">
+<script src="/assets/catalyst-ui.js"></script>
 </head>
 <body>
 <div class="container-fluid">
@@ -1967,6 +1969,7 @@ async function pollSignalLiveExtras() {
   signalLiveExtraPolling = true;
   try {
     const { data } = await axios.get('/api/extra', { params: { ticker, date, days: 2, profile: 'false' } });
+    signalCatalystWarnings = data?.warnings || [];
     signalAllNews = Array.isArray(data?.news) ? data.news : [];
     signalAllFilings = Array.isArray(data?.filings) ? data.filings : [];
     applySignalExtraCutoff(signalCurrentCutoffTime(), { alertNew: true });
@@ -2641,23 +2644,28 @@ function renderSignalProfile(profile) {
   }
 }
 
+let signalCatalystWarnings = [];
+
 function renderSignalNewsAndFilings(newsItems, filingsItems, options = {}) {
   const refreshBaseline = options.refreshBaseline !== false;
+  catalystTableOptions('#signal-news-sheet', signalCatalystWarnings);
+  catalystTableOptions('#signal-filings-sheet', signalCatalystWarnings);
   signalCurrentNews = Array.isArray(newsItems) ? newsItems : [];
   signalCurrentFilings = Array.isArray(filingsItems) ? filingsItems : [];
   const newsColumns = [
     {
       title: "PUBLISHED", field: "published", minWidth: 150, headerSort: false, headerTooltip: true, vertAlign: "top",
-      formatter: function(cell) { return new Date(cell.getValue()).toLocaleString(); }
+      formatter: catalystTimeFormatter
     },
     {
       title: "TITLE", field: "title", minWidth: 400, headerSort: false, headerTooltip: true, vertAlign: "top",
-      formatter: "link", formatterParams: { urlField: "url", target: "_blank", labelField: "title" }
+      formatter: catalystLinkFormatter, formatterParams: { urlField: "url", target: "_blank", labelField: "title" }
     },
     { title: "SOURCE", field: "source", minWidth: 150, headerSort: false, headerTooltip: true, vertAlign: "top" },
   ];
   if (!signalNewsTable) {
     signalNewsTable = new Tabulator("#signal-news-sheet", {
+      ...catalystTableOptions("#signal-news-sheet", signalCatalystWarnings),
       data: signalCurrentNews,
       layout: "fitColumns",
       headerWordWrap: true,
@@ -2672,17 +2680,18 @@ function renderSignalNewsAndFilings(newsItems, filingsItems, options = {}) {
   const filingColumns = [
     {
       title: "FILED AT", field: "filedAt", minWidth: 150, headerSort: false, headerTooltip: true, vertAlign: "top",
-      formatter: function(cell) { return new Date(cell.getValue()).toLocaleString(); }
+      formatter: catalystTimeFormatter
     },
     { title: "FORM TYPE", field: "formType", minWidth: 100, headerSort: false, headerTooltip: true, vertAlign: "top" },
     {
       title: "DESCRIPTION", field: "description", minWidth: 400, headerSort: false, headerTooltip: true, vertAlign: "top",
-      formatter: "link", formatterParams: { urlField: "linkToFilingDetails", target: "_blank", labelField: "description" }
+      formatter: catalystLinkFormatter, formatterParams: { urlField: "linkToFilingDetails", target: "_blank", labelField: "description" }
     },
     { title: "COMPANY", field: "companyName", minWidth: 200, headerSort: false, headerTooltip: true, vertAlign: "top" },
   ];
   if (!signalFilingsTable) {
     signalFilingsTable = new Tabulator("#signal-filings-sheet", {
+      ...catalystTableOptions("#signal-filings-sheet", signalCatalystWarnings),
       data: signalCurrentFilings,
       layout: "fitColumns",
       headerWordWrap: true,
@@ -2874,6 +2883,7 @@ async function loadSignalProfile() {
 async function loadSignalExtras() {
   try {
     const { data } = await axios.get('/api/extra', { params: { ticker, date, days: 2, profile: 'false' } });
+    signalCatalystWarnings = data?.warnings || [];
     signalAllNews = Array.isArray(data?.news) ? data.news : [];
     signalAllFilings = Array.isArray(data?.filings) ? data.filings : [];
     applySignalExtraCutoff(signalCurrentCutoffTime(), { alertNew: false });
@@ -3069,6 +3079,7 @@ function initContextCharts() {
 function renderContextExtra(data) {
   contextNews = data.news || [];
   new Tabulator("#context-news-sheet", {
+      ...catalystTableOptions("#context-news-sheet", data.warnings || []),
     data: contextNews,
     layout: "fitColumns",
     headerWordWrap: true,
@@ -3077,17 +3088,18 @@ function renderContextExtra(data) {
     columns: [
       {
         title: "PUBLISHED", field: "published", minWidth: 150, headerSort: false, headerTooltip: true, vertAlign: "top",
-        formatter: function(cell) { return new Date(cell.getValue()).toLocaleString(); }
+        formatter: catalystTimeFormatter
       },
       {
         title: "TITLE", field: "title", minWidth: 400, headerSort: false, headerTooltip: true, vertAlign: "top",
-        formatter: "link", formatterParams: { urlField: "url", target: "_blank", labelField: "title" }
+        formatter: catalystLinkFormatter, formatterParams: { urlField: "url", target: "_blank", labelField: "title" }
       },
       { title: "SOURCE", field: "source", minWidth: 150, headerSort: false, headerTooltip: true, vertAlign: "top" },
     ],
   });
   contextFilings = data.filings || [];
   new Tabulator("#context-filings-sheet", {
+      ...catalystTableOptions("#context-filings-sheet", data.warnings || []),
     data: contextFilings,
     layout: "fitColumns",
     headerWordWrap: true,
@@ -3096,12 +3108,12 @@ function renderContextExtra(data) {
     columns: [
       {
         title: "FILED AT", field: "filedAt", minWidth: 150, headerSort: false, headerTooltip: true, vertAlign: "top",
-        formatter: function(cell) { return new Date(cell.getValue()).toLocaleString(); }
+        formatter: catalystTimeFormatter
       },
       { title: "FORM TYPE", field: "formType", minWidth: 100, headerSort: false, headerTooltip: true, vertAlign: "top" },
       {
         title: "DESCRIPTION", field: "description", minWidth: 400, headerSort: false, headerTooltip: true, vertAlign: "top",
-        formatter: "link", formatterParams: { urlField: "linkToFilingDetails", target: "_blank", labelField: "description" }
+        formatter: catalystLinkFormatter, formatterParams: { urlField: "linkToFilingDetails", target: "_blank", labelField: "description" }
       },
       { title: "COMPANY", field: "companyName", minWidth: 200, headerSort: false, headerTooltip: true, vertAlign: "top" },
     ],
@@ -4514,6 +4526,7 @@ async function displayBaseExtra(ticker, date) {
     const { data } = await axios.get('/api/extra', { params: { ticker, date, days: 2 } });
     baseCurrentNews = data.news || [];
     new Tabulator("#base-news-sheet", {
+      ...catalystTableOptions("#base-news-sheet", data.warnings || []),
       data: baseCurrentNews,
       layout: "fitColumns",
       headerWordWrap: true,
@@ -4522,17 +4535,18 @@ async function displayBaseExtra(ticker, date) {
       columns: [
         {
           title: "PUBLISHED", field: "published", minWidth: 150, headerSort: false, headerTooltip: true, vertAlign: "top",
-          formatter: function(cell) { return new Date(cell.getValue()).toLocaleString(); }
+          formatter: catalystTimeFormatter
         },
         {
           title: "TITLE", field: "title", minWidth: 400, headerSort: false, headerTooltip: true, vertAlign: "top",
-          formatter: "link", formatterParams: { urlField: "url", target: "_blank", labelField: "title" }
+          formatter: catalystLinkFormatter, formatterParams: { urlField: "url", target: "_blank", labelField: "title" }
         },
         { title: "SOURCE", field: "source", minWidth: 150, headerSort: false, headerTooltip: true, vertAlign: "top" },
       ],
     });
     baseCurrentFilings = data.filings || [];
     new Tabulator("#base-filings-sheet", {
+      ...catalystTableOptions("#base-filings-sheet", data.warnings || []),
       data: baseCurrentFilings,
       layout: "fitColumns",
       headerWordWrap: true,
@@ -4541,12 +4555,12 @@ async function displayBaseExtra(ticker, date) {
       columns: [
         {
           title: "FILED AT", field: "filedAt", minWidth: 150, headerSort: false, headerTooltip: true, vertAlign: "top",
-          formatter: function(cell) { return new Date(cell.getValue()).toLocaleString(); }
+          formatter: catalystTimeFormatter
         },
         { title: "FORM TYPE", field: "formType", minWidth: 100, headerSort: false, headerTooltip: true, vertAlign: "top" },
         {
           title: "DESCRIPTION", field: "description", minWidth: 400, headerSort: false, headerTooltip: true, vertAlign: "top",
-          formatter: "link", formatterParams: { urlField: "linkToFilingDetails", target: "_blank", labelField: "description" }
+          formatter: catalystLinkFormatter, formatterParams: { urlField: "linkToFilingDetails", target: "_blank", labelField: "description" }
         },
         { title: "COMPANY", field: "companyName", minWidth: 200, headerSort: false, headerTooltip: true, vertAlign: "top" },
       ],

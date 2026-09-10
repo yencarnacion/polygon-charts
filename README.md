@@ -18,6 +18,48 @@ Default app URL: `http://localhost:8081`
 
 `MARKETAUX_API_KEY` is optional. When it is not set, the Marketaux Catalyst Radar panels (`/api/market-stats`) are hidden on both pages so the UI stays uncluttered.
 
+## News and catalyst cutoff
+
+Set `RTPR_API_KEY` in `.env` to add RTPR news and press releases, then restart
+with `go run .` or `./go.sh`. An empty or omitted key disables RTPR. The integration
+uses the [documented Article Feed API](https://rtpr.io/docs#article-feed-api), which
+requires RTPR Pro API access. Historical coverage starts in May 2026 and is subject
+to RTPR's retention window. Feed pages are followed until the requested New York
+date range is covered, with a 30-second request budget. Partial coverage is labeled
+in the UI; cached articles and other providers remain available on RTPR failures.
+
+All news views deduplicate canonical URLs (ignoring common tracking parameters)
+and matching headlines across sources, normalizing case, whitespace, and punctuation.
+Headline matches use a 48-hour window and preserve decimal values and numeric signs;
+different reporting periods and figures remain separate. The earliest publication
+is retained so a later syndicated copy does not look like a fresh catalyst. This
+is conservative deduplication, not semantic clustering of differently worded reporting.
+The existing class-action solicitation filter still applies.
+
+In every news and SEC table, items **after the previous trading day's 3:59 p.m.
+New York time** have a blue left stripe and shaded background. Labeled groups mark
+**AFTER** and **AT / BEFORE** that cutoff; rows remain newest first within each group.
+The cutoff uses SPY trading sessions to account for weekends/market holidays and
+New York timezone rules for daylight saving. Intervening calendar days are included.
+Missing times or an unavailable cutoff are labeled separately. Replay still shows
+only items available at its current time. All displayed news/filing times use ET,
+even when the browser is in another timezone.
+
+The design combines a distinct color feature with spatial grouping and explicit
+labels, informed by [visual-search and feature-integration research](https://pmc.ncbi.nlm.nih.gov/articles/PMC6513732/).
+It does not depend on color alone and does not encode bullish/bearish sentiment.
+
+News and filing links open in new tabs. RTPR releases open in a local reader that
+keeps the API key on the server, preserves text/tables, removes active page content,
+and opens links inside the article in new tabs too.
+
+Validation: `go test -race ./...`; opt-in live RTPR check:
+`RTPR_LIVE_TEST=1 go test -run TestRTPRLive -v .`.
+`node scripts/catalyst-browser-check.mjs` checks grouping, replay refresh, ET timestamps
+and new-tab links in headless Chrome (Node 22+); it downloads the same Tabulator
+version as the app. For offline checks, set `TABULATOR_JS` to a local
+`tabulator.min.js` alongside `tabulator.min.css`.
+
 ## ntfy Push Notes
 
 The ntfy integration is disabled by default. Enable it in `.env`:

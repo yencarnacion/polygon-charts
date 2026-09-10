@@ -40,6 +40,7 @@ var (
 	polygonAPIKey     string
 	fmpAPIKey         string
 	secAPIKey         string
+	rtprAPIKey        string
 	marketauxAPIKey   string
 	marketauxEnabled  bool
 	patternfolioURL   string
@@ -138,10 +139,12 @@ type FMPFloat struct {
 const cciPeriod = 27
 
 type NewsItem struct {
-	Title     string `json:"title"`
-	Source    string `json:"source"`
-	URL       string `json:"url"`
-	Published string `json:"published"`
+	Title          string `json:"title"`
+	Source         string `json:"source"`
+	URL            string `json:"url"`
+	Published      string `json:"published"`
+	CatalystPeriod string `json:"catalyst_period,omitempty"`
+	CatalystCutoff string `json:"catalyst_cutoff,omitempty"`
 }
 
 type marketauxEntityStat struct {
@@ -935,8 +938,10 @@ func queryMassiveBenzingaNews(ticker, dateStr string) ([]map[string]interface{},
 	nextD := nextDay(dateStr)
 	params := url.Values{}
 	params.Set("tickers", strings.ToUpper(strings.TrimSpace(ticker)))
-	params.Set("published.gte", dateStr+"T00:00:00Z")
-	params.Set("published.lt", nextD+"T00:00:00Z")
+	start, _ := time.ParseInLocation("2006-01-02", dateStr, marketNewsLocation)
+	params.Set("published.gte", start.UTC().Format(time.RFC3339))
+	end, _ := time.ParseInLocation("2006-01-02", nextD, marketNewsLocation)
+	params.Set("published.lt", end.UTC().Format(time.RFC3339))
 	params.Set("limit", "50")
 	params.Set("sort", "published")
 	params.Set("order", "desc")
@@ -946,7 +951,7 @@ func queryMassiveBenzingaNews(ticker, dateStr string) ([]map[string]interface{},
 		Results []map[string]interface{} `json:"results"`
 	}
 	resp, err := cachedJSONGet[massiveBenzingaResp](
-		jsonCachePath("massive_benzinga_news", strings.ToUpper(strings.TrimSpace(ticker)), dateStr),
+		jsonCachePath("massive_benzinga_news_ny", strings.ToUpper(strings.TrimSpace(ticker)), dateStr),
 		endpoint,
 		60*time.Second,
 		dateScopedDataIsComplete(dateStr, time.Now()),
@@ -1164,7 +1169,7 @@ func normalizePublished(s string) string {
 	if t.IsZero() {
 		return raw
 	}
-	return t.UTC().Format(time.RFC3339)
+	return t.UTC().Format(time.RFC3339Nano)
 }
 
 func isNewsNewer(a, b NewsItem) bool {
@@ -1951,139 +1956,25 @@ func extraHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "ticker and date required", 400)
 		return
 	}
-	var allNewsItems []NewsItem
-	var allFilings []map[string]interface{}
-	var profile []map[string]interface{}
-	includeProfile := strings.ToLower(strings.TrimSpace(q.Get("profile"))) != "false"
-	// Fetch for current day
-	pNews, _ := queryMassiveBenzingaNews(ticker, dateStr)
-	allNewsItems = appendMassiveNewsItems(allNewsItems, pNews)
-	fNews, _ := queryFMPNews(ticker, dateStr)
-	for _, f := range fNews {
-		val, exists := f["title"]
-		if !exists || val == nil {
-			continue
-		}
-		title, ok := val.(string)
-		if !ok {
-			continue
-		}
-		val, exists = f["site"]
-		if !exists || val == nil {
-			continue
-		}
-		site, ok := val.(string)
-		if !ok {
-			continue
-		}
-		val, exists = f["url"]
-		if !exists || val == nil {
-			continue
-		}
-		url, ok := val.(string)
-		if !ok {
-			continue
-		}
-		val, exists = f["publishedDate"]
-		if !exists || val == nil {
-			continue
-		}
-		pub, ok := val.(string)
-		if !ok {
-			continue
-		}
-		allNewsItems = append(allNewsItems, NewsItem{
-			Title:     title,
-			Source:    site,
-			URL:       url,
-			Published: normalizePublished(pub),
-		})
+	if !tickerPattern.MatchString(ticker) || !validISODate(dateStr) || (days != 1 && days != 2) {
+		http.Error(w, "valid ticker, date and days (1 or 2) required", http.StatusBadRequest)
+		return
 	}
-	filings, _ := querySECFilings(ticker, dateStr)
-	allFilings = append(allFilings, filings...)
-	if includeProfile {
+	uniqueNews, allFilings, prior, warnings := collectCatalysts(r.Context(), ticker, dateStr, days)
+	var profile []map[string]interface{}
+	if strings.ToLower(strings.TrimSpace(q.Get("profile"))) != "false" {
 		profile, _ = queryFMPProfile(ticker)
 	}
-	// Fetch for prior day if days=2
-	if days == 2 {
-		priorStr, err := getPriorTradingDate(ticker, dateStr)
-		if err == nil {
-			pNews, _ = queryMassiveBenzingaNews(ticker, priorStr)
-			allNewsItems = appendMassiveNewsItems(allNewsItems, pNews)
-			fNews, _ = queryFMPNews(ticker, priorStr)
-			for _, f := range fNews {
-				val, exists := f["title"]
-				if !exists || val == nil {
-					continue
-				}
-				title, ok := val.(string)
-				if !ok {
-					continue
-				}
-				val, exists = f["site"]
-				if !exists || val == nil {
-					continue
-				}
-				site, ok := val.(string)
-				if !ok {
-					continue
-				}
-				val, exists = f["url"]
-				if !exists || val == nil {
-					continue
-				}
-				url, ok := val.(string)
-				if !ok {
-					continue
-				}
-				val, exists = f["publishedDate"]
-				if !exists || val == nil {
-					continue
-				}
-				pub, ok := val.(string)
-				if !ok {
-					continue
-				}
-				allNewsItems = append(allNewsItems, NewsItem{
-					Title:     title,
-					Source:    site,
-					URL:       url,
-					Published: normalizePublished(pub),
-				})
-			}
-			filings, _ := querySECFilings(ticker, priorStr)
-			allFilings = append(allFilings, filings...)
-		} else {
-			log.Println("Could not find prior trading date:", err)
-		}
-	}
-	// Deduplicate news by URL
-	allNewsItems = filterTradeableNews(allNewsItems)
-	uniqueMap := make(map[string]NewsItem)
-	for _, n := range allNewsItems {
-		uniqueMap[n.URL] = n
-	}
-	uniqueNews := []NewsItem{}
-	for _, n := range uniqueMap {
-		uniqueNews = append(uniqueNews, n)
-	}
-	sort.Slice(uniqueNews, func(i, j int) bool {
-		return isNewsNewer(uniqueNews[i], uniqueNews[j])
-	})
-	// Sort filings by filedAt desc
-	sort.Slice(allFilings, func(i, j int) bool {
-		ti := parsePublished(allFilings[i]["filedAt"].(string))
-		tj := parsePublished(allFilings[j]["filedAt"].(string))
-		return ti.After(tj)
-	})
 	var profileData map[string]interface{}
 	if len(profile) > 0 {
 		profileData = profile[0]
 	}
 	out := map[string]interface{}{
-		"news":    uniqueNews,
-		"filings": allFilings,
-		"profile": profileData,
+		"prior_trading_date": prior,
+		"warnings":           warnings,
+		"news":               uniqueNews,
+		"filings":            allFilings,
+		"profile":            profileData,
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(out)
@@ -2563,113 +2454,10 @@ func chartDataHandler(w http.ResponseWriter, r *http.Request) {
 	uniqueNews := []NewsItem{}
 	var allFilings []map[string]interface{}
 	var profileData map[string]interface{}
+	warnings := []string{}
 	if includeExtras {
-		var allNewsItems []NewsItem
-		// Fetch current day
-		pNews, _ := queryMassiveBenzingaNews(symbol, dateStr)
-		allNewsItems = appendMassiveNewsItems(allNewsItems, pNews)
-		fNews, _ := queryFMPNews(symbol, dateStr)
-		for _, f := range fNews {
-			val, exists := f["title"]
-			if !exists || val == nil {
-				continue
-			}
-			title, ok := val.(string)
-			if !ok {
-				continue
-			}
-			val, exists = f["site"]
-			if !exists || val == nil {
-				continue
-			}
-			site, ok := val.(string)
-			if !ok {
-				continue
-			}
-			val, exists = f["url"]
-			if !exists || val == nil {
-				continue
-			}
-			url, ok := val.(string)
-			if !ok {
-				continue
-			}
-			val, exists = f["publishedDate"]
-			if !exists || val == nil {
-				continue
-			}
-			pub, ok := val.(string)
-			if !ok {
-				continue
-			}
-			allNewsItems = append(allNewsItems, NewsItem{Title: title, Source: site, URL: url, Published: normalizePublished(pub)})
-		}
-		filings, _ := querySECFilings(symbol, dateStr)
-		allFilings = append(allFilings, filings...)
-		// Fetch prior day
-		priorStr, err := getPriorTradingDate(symbol, dateStr)
-		if err == nil {
-			pNewsPrior, _ := queryMassiveBenzingaNews(symbol, priorStr)
-			allNewsItems = appendMassiveNewsItems(allNewsItems, pNewsPrior)
-			fNewsPrior, _ := queryFMPNews(symbol, priorStr)
-			for _, f := range fNewsPrior {
-				val, exists := f["title"]
-				if !exists || val == nil {
-					continue
-				}
-				title, ok := val.(string)
-				if !ok {
-					continue
-				}
-				val, exists = f["site"]
-				if !exists || val == nil {
-					continue
-				}
-				site, ok := val.(string)
-				if !ok {
-					continue
-				}
-				val, exists = f["url"]
-				if !exists || val == nil {
-					continue
-				}
-				url, ok := val.(string)
-				if !ok {
-					continue
-				}
-				val, exists = f["publishedDate"]
-				if !exists || val == nil {
-					continue
-				}
-				pub, ok := val.(string)
-				if !ok {
-					continue
-				}
-				allNewsItems = append(allNewsItems, NewsItem{Title: title, Source: site, URL: url, Published: normalizePublished(pub)})
-			}
-			filingsPrior, _ := querySECFilings(symbol, priorStr)
-			allFilings = append(allFilings, filingsPrior...)
-		}
-		// Deduplicate and sort news
-		allNewsItems = filterTradeableNews(allNewsItems)
-		uniqueMap := make(map[string]NewsItem)
-		for _, n := range allNewsItems {
-			uniqueMap[n.URL] = n
-		}
-		for _, n := range uniqueMap {
-			uniqueNews = append(uniqueNews, n)
-		}
-		sort.Slice(uniqueNews, func(i, j int) bool {
-			return isNewsNewer(uniqueNews[i], uniqueNews[j])
-		})
-		// Sort filings
-		sort.Slice(allFilings, func(i, j int) bool {
-			ti := parsePublished(allFilings[i]["filedAt"].(string))
-			tj := parsePublished(allFilings[j]["filedAt"].(string))
-			return ti.After(tj)
-		})
-		var profile []map[string]interface{}
-		profile, _ = queryFMPProfile(symbol)
+		uniqueNews, allFilings, _, warnings = collectCatalysts(r.Context(), symbol, dateStr, 2)
+		profile, _ := queryFMPProfile(symbol)
 		if len(profile) > 0 {
 			profileData = profile[0]
 		}
@@ -2684,6 +2472,7 @@ func chartDataHandler(w http.ResponseWriter, r *http.Request) {
 		"cci":                cci,
 		"metrics":            metrics,
 		"prior_trading_date": priorTradingDate,
+		"warnings":           warnings,
 		"news":               uniqueNews,
 		"filings":            allFilings,
 		"profile":            profileData,
@@ -2782,6 +2571,7 @@ func main() {
 		log.Fatal("FMP API key missing")
 	}
 	secAPIKey = os.Getenv("SEC_API_KEY")
+	rtprAPIKey = strings.TrimSpace(os.Getenv("RTPR_API_KEY"))
 	if secAPIKey == "" {
 		log.Fatal("SEC API key missing")
 	}
@@ -2827,6 +2617,9 @@ func main() {
 	http.HandleFunc("/api/share-float", shareFloatHandler)
 	http.HandleFunc("/api/profile", profileHandler)
 	http.HandleFunc("/api/extra", extraHandler)
+	http.HandleFunc("/api/rtpr/article", rtprArticleHandler)
+	http.HandleFunc("/assets/catalyst-ui.js", catalystScriptHandler)
+	http.HandleFunc("/assets/catalyst-ui.css", catalystStyleHandler)
 	http.HandleFunc("/api/market-stats", marketStatsHandler)
 	http.HandleFunc("/chart", chartHandler)
 	http.HandleFunc("/api/open-chart", openChartHandler)

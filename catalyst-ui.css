@@ -1,0 +1,12 @@
+/* Redundant color, position and labels make the cutoff visible without reading timestamps. */
+.tabulator .tabulator-row.catalyst-recent .tabulator-cell { background-color: #17364b; }
+.tabulator .tabulator-row.catalyst-recent .tabulator-cell:first-child { box-shadow: inset 5px 0 #70d3ff; padding-left: 12px; }
+.tabulator .tabulator-row.tabulator-group { background: #152335; color: #dce7f4; border-top: 2px solid #697d96; padding: 9px 12px; cursor: default; }
+.tabulator .tabulator-row.tabulator-group .tabulator-arrow { display: none; }
+.tabulator .tabulator-row.tabulator-group .catalyst-group { margin-left: 0; color: #c1ccda; font-size: 12px; letter-spacing: .035em; }
+.tabulator .tabulator-row.tabulator-group .catalyst-group-recent { color: #90ddff; border-left: 5px solid #70d3ff; padding-left: 9px; }
+.tabulator .tabulator-row.tabulator-group .catalyst-group-unknown { color: #e3c58b; }
+.catalyst-coverage { color: #e3c58b; margin: 8px 0; font-size: 13px; }
+@media (forced-colors: active) {
+  .tabulator .tabulator-row.catalyst-recent .tabulator-cell:first-child { border-left: 5px solid Highlight; }
+}

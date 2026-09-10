@@ -1023,6 +1023,8 @@
       }
     }
   </style>
+<link rel="stylesheet" href="/assets/catalyst-ui.css">
+<script src="/assets/catalyst-ui.js"></script>
 </head>
 <body>
 <div class="container-fluid">
@@ -2935,6 +2937,7 @@ function initContextCharts() {
 function renderContextExtra(data) {
   contextNews = data.news || [];
   new Tabulator("#context-news-sheet", {
+      ...catalystTableOptions("#context-news-sheet", data.warnings || []),
     data: contextNews,
     layout: "fitColumns",
     headerWordWrap: true,
@@ -2943,17 +2946,18 @@ function renderContextExtra(data) {
     columns: [
       {
         title: "PUBLISHED", field: "published", minWidth: 150, headerSort: false, headerTooltip: true, vertAlign: "top",
-        formatter: function(cell) { return new Date(cell.getValue()).toLocaleString(); }
+        formatter: catalystTimeFormatter
       },
       {
         title: "TITLE", field: "title", minWidth: 400, headerSort: false, headerTooltip: true, vertAlign: "top",
-        formatter: "link", formatterParams: { urlField: "url", target: "_blank", labelField: "title" }
+        formatter: catalystLinkFormatter, formatterParams: { urlField: "url", target: "_blank", labelField: "title" }
       },
       { title: "SOURCE", field: "source", minWidth: 150, headerSort: false, headerTooltip: true, vertAlign: "top" },
     ],
   });
   contextFilings = data.filings || [];
   new Tabulator("#context-filings-sheet", {
+      ...catalystTableOptions("#context-filings-sheet", data.warnings || []),
     data: contextFilings,
     layout: "fitColumns",
     headerWordWrap: true,
@@ -2962,12 +2966,12 @@ function renderContextExtra(data) {
     columns: [
       {
         title: "FILED AT", field: "filedAt", minWidth: 150, headerSort: false, headerTooltip: true, vertAlign: "top",
-        formatter: function(cell) { return new Date(cell.getValue()).toLocaleString(); }
+        formatter: catalystTimeFormatter
       },
       { title: "FORM TYPE", field: "formType", minWidth: 100, headerSort: false, headerTooltip: true, vertAlign: "top" },
       {
         title: "DESCRIPTION", field: "description", minWidth: 400, headerSort: false, headerTooltip: true, vertAlign: "top",
-        formatter: "link", formatterParams: { urlField: "linkToFilingDetails", target: "_blank", labelField: "description" }
+        formatter: catalystLinkFormatter, formatterParams: { urlField: "linkToFilingDetails", target: "_blank", labelField: "description" }
       },
       { title: "COMPANY", field: "companyName", minWidth: 200, headerSort: false, headerTooltip: true, vertAlign: "top" },
     ],
@@ -4577,16 +4581,15 @@ async function displayExtra(ticker, date) {
     const newsItems = data.news || [];
     currentNews = newsItems;
     new Tabulator("#news-sheet", {
+      ...catalystTableOptions("#news-sheet", data.warnings || []),
       data: newsItems,
       layout: "fitColumns",
       headerWordWrap: true,
       tooltipsHeader: true,
       tooltips: truncatedTooltip,
       columns: [
-        {title: "PUBLISHED", field: "published", minWidth: 150, headerSort: false, headerTooltip: true, vertAlign:"top", formatter: function(cell){
-          return new Date(cell.getValue()).toLocaleString();
-        }},
-        {title: "TITLE", field: "title", minWidth: 400, headerSort: false, headerTooltip: true, vertAlign:"top", formatter: "link", formatterParams: {
+        {title: "PUBLISHED", field: "published", minWidth: 150, headerSort: false, headerTooltip: true, vertAlign:"top", formatter: catalystTimeFormatter},
+        {title: "TITLE", field: "title", minWidth: 400, headerSort: false, headerTooltip: true, vertAlign:"top", formatter: catalystLinkFormatter, formatterParams: {
           urlField: "url",
           target: "_blank",
           labelField: "title"
@@ -4597,17 +4600,16 @@ async function displayExtra(ticker, date) {
     const filingsItems = data.filings || [];
     currentFilings = filingsItems;
     new Tabulator("#filings-sheet", {
+      ...catalystTableOptions("#filings-sheet", data.warnings || []),
       data: filingsItems,
       layout: "fitColumns",
       headerWordWrap: true,
       tooltipsHeader: true,
       tooltips: truncatedTooltip,
       columns: [
-        {title: "FILED AT", field: "filedAt", minWidth: 150, headerSort: false, headerTooltip: true, vertAlign:"top", formatter: function(cell){
-          return new Date(cell.getValue()).toLocaleString();
-        }},
+        {title: "FILED AT", field: "filedAt", minWidth: 150, headerSort: false, headerTooltip: true, vertAlign:"top", formatter: catalystTimeFormatter},
         {title: "FORM TYPE", field: "formType", minWidth: 100, headerSort: false, headerTooltip: true, vertAlign:"top"},
-        {title: "DESCRIPTION", field: "description", minWidth: 400, headerSort: false, headerTooltip: true, vertAlign:"top", formatter: "link", formatterParams: {
+        {title: "DESCRIPTION", field: "description", minWidth: 400, headerSort: false, headerTooltip: true, vertAlign:"top", formatter: catalystLinkFormatter, formatterParams: {
           urlField: "linkToFilingDetails",
           target: "_blank",
           labelField: "description"
