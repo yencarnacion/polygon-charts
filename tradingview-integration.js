@@ -19,6 +19,42 @@
     return document.getElementById('runSymbolAction');
   }
 
+  function ensureMarketSurgeButton() {
+    let button = document.getElementById('openMarketSurge');
+    if (button) return button;
+
+    const symbolButton = actionButton();
+    const feedback = document.getElementById('symbolActionFeedback');
+    const insertionPoint = feedback || symbolButton;
+    if (!insertionPoint) return null;
+
+    button = document.createElement('a');
+    button.id = 'openMarketSurge';
+    button.className = 'btn btn-outline-warning';
+    button.textContent = 'MarketSurge';
+    button.target = '_blank';
+    button.rel = 'noopener noreferrer';
+    button.title = 'Open this symbol in MarketSurge';
+    button.style.marginLeft = '0.35rem';
+    insertionPoint.insertAdjacentElement('afterend', button);
+    return button;
+  }
+
+  function refreshMarketSurgeButton() {
+    const button = ensureMarketSurgeButton();
+    if (!button) return;
+    const symbol = currentSymbol();
+    if (!symbol) {
+      button.classList.add('disabled');
+      button.setAttribute('aria-disabled', 'true');
+      button.removeAttribute('href');
+      return;
+    }
+    button.classList.remove('disabled');
+    button.removeAttribute('aria-disabled');
+    button.href = `https://marketsurge.investors.com/mstool?chart=${encodeURIComponent(`symbol:${symbol}`)}`;
+  }
+
   function ensureStatusElement() {
     let status = document.getElementById('tradingViewIntegrationStatus');
     if (status) return status;
@@ -134,8 +170,12 @@
   }, true);
 
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => void refreshStatus(), { once: true });
+    document.addEventListener('DOMContentLoaded', () => {
+      refreshMarketSurgeButton();
+      void refreshStatus();
+    }, { once: true });
   } else {
+    refreshMarketSurgeButton();
     void refreshStatus();
   }
   setInterval(() => void refreshStatus(), 5000);
