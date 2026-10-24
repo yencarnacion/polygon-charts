@@ -205,6 +205,9 @@ func TestDeduplicateNumericChangesAndAliasChains(t *testing.T) {
 }
 
 func TestExtraHandlerHolidayWindowAndRTPRFailure(t *testing.T) {
+	oldProvider, oldSECKey := secProvider, secAPIKey
+	secProvider, secAPIKey = "sec-api", "test-sec-key"
+	t.Cleanup(func() { secProvider, secAPIKey = oldProvider, oldSECKey })
 	isolateRTPR(t, func(r *http.Request) (*http.Response, error) { return mockResponse(`{}`, 503), nil })
 	previous := http.DefaultClient
 	defer func() { http.DefaultClient = previous }()

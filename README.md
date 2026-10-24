@@ -18,6 +18,60 @@ Default app URL: `http://localhost:8081`
 
 `MARKETAUX_API_KEY` is optional. When it is not set, the Marketaux Catalyst Radar panels (`/api/market-stats`) are hidden on both pages so the UI stays uncluttered.
 
+## SEC filings: free EDGAR by default
+
+SEC filings use the [SEC's public EDGAR API](https://www.sec.gov/search-filings/edgar-application-programming-interfaces)
+by default. No SEC account, subscription, or API key is needed. Add your declared
+application name and contact email to `.env`, then restart the application:
+
+```dotenv
+SEC_FILINGS_PROVIDER=edgar
+SEC_USER_AGENT="Polygon Charts your-email@example.com"
+```
+
+Replace the example email with your own. `SEC_USER_AGENT` identifies automated
+requests as required by the [SEC's access policy](https://www.sec.gov/about/webmaster-frequently-asked-questions).
+It is not a password or API key. If omitted, charts still start and the catalyst
+tables show an actionable warning; no unidentified EDGAR requests are sent.
+
+`SEC_API_KEY` is optional and ignored by the default provider. To explicitly use
+the existing paid sec-api.io integration instead:
+
+```dotenv
+SEC_FILINGS_PROVIDER=sec-api
+SEC_API_KEY=your-sec-api-key
+```
+
+There is no automatic switch to the paid provider on an EDGAR failure. Selecting
+`sec-api` without its key, or an unknown provider name, produces a startup error.
+
+The EDGAR adapter preserves the filing table and copy-JSON fields, document links,
+newest-first ordering, New York catalyst cutoffs, and intraday replay filtering.
+It resolves ticker symbols to CIKs (including share-class aliases such as `BRK.B`),
+reads company submissions, and follows relevant historical submission files for
+older chart dates. Descriptions use the filing's primary-document description,
+falling back to its form type. They are labels, not generated filing summaries.
+
+Precise acceptance times come from each filing's original SEC header, since the
+submissions JSON's UTC offsets can be inconsistent. Filing dates may differ from
+acceptance dates after hours; historical lookup includes a seven-day forward
+margin for weekends and holidays, then filters by verified acceptance time in ET.
+Filings whose acceptance time cannot be verified are omitted with an incomplete
+coverage warning rather than assigned an invented replay time. Acceptance time
+does not guarantee the instant a filing became publicly available.
+
+Requests run through the Go backend with timeouts and cancellation, are limited
+to five requests per second per process, and are cached separately from sec-api.io.
+Company submissions refresh after 60 seconds; ticker mappings, historical chunks,
+and verified header times refresh after 24 hours. Failed refreshes can retain
+cached metadata with a visible stale/incomplete warning. Missing ticker mappings,
+including some renamed or delisted symbols, also produce a coverage warning.
+The SEC's ten-requests-per-second limit applies across all your applications and
+machines, so leave headroom if other tools also download EDGAR data.
+
+Validation: `go test -race ./...`. Optional live SEC smoke test, using your real
+contact header: `EDGAR_LIVE_TEST=1 SEC_USER_AGENT="Polygon Charts you@example.com" go test -run '^TestEDGARLive$' -v .`.
+
 ## News and catalyst cutoff
 
 Set `RTPR_API_KEY` in `.env` to add RTPR news and press releases, then restart

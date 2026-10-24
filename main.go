@@ -1074,7 +1074,10 @@ func filterTradeableNews(items []NewsItem) []NewsItem {
 	return out
 }
 
-func querySECFilings(ticker, dateStr string) ([]map[string]interface{}, error) {
+func querySECAPIFilings(ticker, dateStr string) ([]map[string]interface{}, error) {
+	if strings.TrimSpace(secAPIKey) == "" {
+		return nil, fmt.Errorf("SEC_API_KEY is required when SEC_FILINGS_PROVIDER=sec-api")
+	}
 	ticker = strings.ToUpper(strings.TrimSpace(ticker))
 	payload := map[string]interface{}{
 		"query": fmt.Sprintf("ticker:%s AND filedAt:[%s TO %s]", ticker, dateStr, dateStr),
@@ -2570,10 +2573,12 @@ func main() {
 	if fmpAPIKey == "" {
 		log.Fatal("FMP API key missing")
 	}
-	secAPIKey = os.Getenv("SEC_API_KEY")
+	if err := configureSECProvider(); err != nil {
+		log.Fatal(err)
+	}
 	rtprAPIKey = strings.TrimSpace(os.Getenv("RTPR_API_KEY"))
-	if secAPIKey == "" {
-		log.Fatal("SEC API key missing")
+	if secProvider == "edgar" && secUserAgent == "" {
+		log.Print("SEC filings use free EDGAR; set SEC_USER_AGENT to your app name and contact email to enable requests")
 	}
 	marketauxAPIKey = strings.TrimSpace(os.Getenv("MARKETAUX_API_KEY"))
 	if marketauxAPIKey == "" {

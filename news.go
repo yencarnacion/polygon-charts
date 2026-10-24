@@ -144,6 +144,7 @@ func collectCatalysts(ctx context.Context, ticker, date string, days int) ([]New
 	var filings []map[string]interface{}
 	var rtprNews []NewsItem
 	var rtprErr error
+	var secIncomplete bool
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() { defer wg.Done(); rtprNews, rtprErr = queryRTPRNews(ctx, ticker, from, date) }()
@@ -157,7 +158,8 @@ func collectCatalysts(ctx context.Context, ticker, date string, days int) ([]New
 				news = append(news, NewsItem{Title: title, URL: link, Source: firstNonEmptyString(f, "site"), Published: normalizePublished(published)})
 			}
 		}
-		sec, _ := querySECFilings(ticker, day)
+		sec, secErr := querySECFilingsContext(ctx, ticker, day)
+		secIncomplete = secIncomplete || secErr != nil
 		filings = append(filings, sec...)
 	}
 	wg.Wait()
@@ -167,6 +169,13 @@ func collectCatalysts(ctx context.Context, ticker, date string, days int) ([]New
 	})
 	annotateCatalysts(news, filings, catalystCutoff(prior))
 	warnings := []string{}
+	if secIncomplete {
+		warning := "SEC filing coverage is incomplete or unavailable; cached filings may be stale."
+		if secProvider == "edgar" && secUserAgent == "" {
+			warning = "SEC filings unavailable: set SEC_USER_AGENT to your app name and contact email for free EDGAR access."
+		}
+		warnings = append(warnings, warning)
+	}
 	if prior == "" {
 		warnings = append(warnings, "Previous trading day unavailable; catalyst cutoff could not be determined.")
 	}
