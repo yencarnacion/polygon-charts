@@ -5,6 +5,11 @@
   const TICKER_ENDPOINT = '/api/integrations/tradingview/ticker';
   const SYMBOL_PATTERN = /^[A-Z][A-Z0-9.-]{0,15}$/;
 
+  const chartParams = new URLSearchParams(location.search);
+  const replayPort = chartParams.get('gap_replay');
+  const localTimedChart = chartParams.has('time') && ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
+  let discoveredReplay = false;
+  let selecting = false;
   let integrationEnabled = null;
   let lastSymbol = '';
   let activeRequest = null;
@@ -75,19 +80,94 @@
     return status;
   }
 
-  function exposeTradingViewOnlyAction() {
+  function exposeActions(replay = Boolean(replayPort) || discoveredReplay) {
     const button = actionButton();
-    if (!button || !integrationEnabled) return;
-
-    const feedback = document.getElementById('symbolActionFeedback');
-    const wasHidden = button.classList.contains('d-none');
+    if (!button) return;
+    const configured = button.dataset.configured === 'true';
+    if (!configured && !integrationEnabled && !replay) return;
     button.classList.remove('d-none');
-    if (feedback) feedback.classList.remove('d-none');
-    if (wasHidden) {
-      button.textContent = 'Load in TradingView';
-      button.title = 'Change the active chart in TradingView Desktop';
-    } else {
-      button.title = 'Run the configured symbol action and also change TradingView Desktop';
+    document.getElementById('symbolActionFeedback')?.classList.remove('d-none');
+    if (!configured) button.textContent = replay ? 'Load in Tape + Trading' : 'Load in TradingView';
+    if (replay) button.title = 'Load this ticker at the current Tape replay time';
+  }
+
+  function replayURL(port) {
+    return `http://127.0.0.1:${port}/api/polygon/replay`;
+  }
+
+  async function replayDestination() {
+    if (replayPort) return replayURL(replayPort);
+    if (!localTimedChart) return '';
+    // Older local chart links have a date and time but no replay port.
+    const url = replayURL(8176);
+    try {
+      const response = await fetch(url, { credentials: 'omit', cache: 'no-store', signal: AbortSignal.timeout(900) });
+      if (response.ok) {
+        const desk = await response.json();
+        if (desk.app === 'daidai-gap-replay' && desk.date === chartParams.get('date')) return url;
+      }
+    } catch { /* A standalone chart can still use its configured action. */ }
+    return '';
+  }
+
+  function feedback(message, kind = '') {
+    const target = document.getElementById('symbolActionFeedback');
+    if (!target) return;
+    target.textContent = message;
+    target.classList.remove('is-error', 'is-success');
+    if (kind) target.classList.add('is-' + kind);
+  }
+
+  async function confirmQueuedSelection(url, ticket, symbol) {
+    for (let attempt = 0; attempt < 60; attempt++) {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      const response = await fetch(url, { credentials: 'omit', cache: 'no-store', signal: AbortSignal.timeout(3000) });
+      if (!response.ok) throw new Error('Replay status unavailable.');
+      const desk = await response.json();
+      if (desk.date !== chartParams.get('date')) throw new Error('The replay session changed.');
+      if (desk.command_id < ticket) continue;
+      if (desk.state === 'ready' && desk.symbol === symbol) return true;
+      throw new Error(desk.message || 'The replay selection changed or could not finish.');
+    }
+    return false;
+  }
+
+  async function loadSymbol(symbol) {
+    const button = actionButton();
+    if (!symbol || !button || selecting) return;
+    const configured = button.dataset.configured === 'true';
+    if (!configured && !replayPort && !localTimedChart) return;
+    selecting = true;
+    button.disabled = true;
+    let url = '';
+    try {
+      url = await replayDestination();
+      if (!url && !configured) return;
+      feedback(url ? `Loading ${symbol} in Tape replay…` : `Sending ${symbol}…`);
+      const response = await fetch(url || '/api/symbol-action', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        credentials: url ? 'omit' : 'same-origin',
+        body: JSON.stringify(url ? { symbol, date: chartParams.get('date') } : { symbol })
+      });
+      const body = await response.text();
+      let result = {};
+      try { result = JSON.parse(body) || {}; } catch { /* Generic receivers can return plain text. */ }
+      if (!response.ok) throw new Error(result.error || body.trim() || response.statusText);
+      if (url) {
+        const loaded = response.status === 202
+          ? await confirmQueuedSelection(url, result.command_id, symbol)
+          : result.loaded === true && result.symbol === symbol;
+        if (loaded) feedback(`Tape replay · ${symbol}`, 'success');
+        else feedback(`Tape replay has not confirmed ${symbol} yet.`);
+      } else {
+        if (result.tape_ok === false) throw new Error(result.tape_error || 'Tape unavailable.');
+        feedback(`${symbol} sent`, 'success');
+      }
+    } catch (error) {
+      feedback((url ? 'Tape replay: ' : '') + error.message, 'error');
+    } finally {
+      selecting = false;
+      button.disabled = false;
     }
   }
 
@@ -103,7 +183,7 @@
       return;
     }
 
-    exposeTradingViewOnlyAction();
+    exposeActions();
     status.hidden = false;
     if (connected) {
       if (symbol) lastSymbol = String(symbol).toUpperCase();
@@ -160,23 +240,23 @@
     }
   }
 
-  // Capture before the existing symbol-action listener. The original
-  // Tape/Yamir Trading Tools request and this TradingView request then proceed
-  // independently; either destination can be offline without blocking the other.
   document.addEventListener('click', event => {
-    const target = event.target instanceof Element ? event.target.closest('#runSymbolAction') : null;
-    if (!target) return;
-    void sendToTradingView(currentSymbol());
+    if (!(event.target instanceof Element) || !event.target.closest('#runSymbolAction')) return;
+    const symbol = currentSymbol();
+    void loadSymbol(symbol);
+    void sendToTradingView(symbol);
   }, true);
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => {
-      refreshMarketSurgeButton();
-      void refreshStatus();
-    }, { once: true });
-  } else {
+  function init() {
     refreshMarketSurgeButton();
+    exposeActions();
+    if (localTimedChart && !replayPort && actionButton()?.dataset.configured !== 'true') {
+      void replayDestination().then(url => { if (url) { discoveredReplay = true; exposeActions(); } });
+    }
     void refreshStatus();
   }
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init, { once: true });
+  else init();
   setInterval(() => void refreshStatus(), 5000);
 })();

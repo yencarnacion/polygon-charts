@@ -1569,6 +1569,11 @@ func validResolution(tf string) bool {
 	}
 }
 
+func validGapReplayPort(raw string) bool {
+	port, err := strconv.Atoi(raw)
+	return err == nil && port >= 1024 && port <= 65535 && strconv.Itoa(port) == raw
+}
+
 func openChartHandler(w http.ResponseWriter, r *http.Request) {
 	path := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/open-chart"), "/")
 	q := r.URL.Query()
@@ -1632,6 +1637,13 @@ func openChartHandler(w http.ResponseWriter, r *http.Request) {
 	params.Set("signal", signal)
 	if normTime != "" {
 		params.Set("time", normTime)
+	}
+	if q.Has("gap_replay") {
+		if !validGapReplayPort(q.Get("gap_replay")) {
+			http.Error(w, "invalid Gap replay port", http.StatusBadRequest)
+			return
+		}
+		params.Set("gap_replay", q.Get("gap_replay"))
 	}
 	http.Redirect(w, r, "/chart?"+params.Encode(), http.StatusFound)
 }
@@ -2244,6 +2256,10 @@ func getPriorTradingDate(ticker, dateStr string) (string, error) {
 
 func chartHandler(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
+	if q.Has("gap_replay") && !validGapReplayPort(q.Get("gap_replay")) {
+		http.Error(w, "invalid Gap replay port", http.StatusBadRequest)
+		return
+	}
 	date := strings.TrimSpace(q.Get("date"))
 	ticker := strings.ToUpper(strings.TrimSpace(q.Get("ticker")))
 	timeStr, err := normalizeHHMM(q.Get("time"))

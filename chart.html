@@ -1029,7 +1029,7 @@
         <div class="signal-action-row">
           <button class="btn btn-primary" type="button" onclick="postToPatternfolio()">Post to Patternfolio</button>
           <button id="toggleNtfyComposer" class="btn btn-outline-light {{NTFY_ENABLED_CLASS}}" type="button">Push to ntfy</button>
-          <button id="runSymbolAction" class="btn btn-outline-info {{SYMBOL_ACTION_ENABLED_CLASS}}" type="button">{{SYMBOL_ACTION_LABEL}}</button>
+          <button id="runSymbolAction" data-configured="{{SYMBOL_ACTION_ENABLED}}" class="btn btn-outline-info {{SYMBOL_ACTION_ENABLED_CLASS}}" type="button">{{SYMBOL_ACTION_LABEL}}</button>
           <span id="symbolActionFeedback" class="symbol-action-feedback {{SYMBOL_ACTION_ENABLED_CLASS}}" aria-live="polite"></span>
           <span id="ntfyFeedback" class="ntfy-feedback {{NTFY_ENABLED_CLASS}}" aria-live="polite"></span>
         </div>
@@ -1273,7 +1273,6 @@ const ntfyEnabled = {{NTFY_ENABLED}};
 const ntfyServer = {{NTFY_SERVER_JSON}};
 const ntfyTopic = {{NTFY_TOPIC_JSON}};
 const ntfyTagOptions = {{NTFY_TAG_OPTIONS_JSON}};
-const symbolActionEnabled = {{SYMBOL_ACTION_ENABLED}};
 // Signal Chart Logic
 let signalListenersAdded = false;
 let signalChart, signalCandleSeries, signalVolumeSeries, signalVwapSeries, signalSmaSeries, signalMarkerSeries, signalCciPlot;
@@ -1318,7 +1317,6 @@ let contextIntradayDailyPivotPriceLines = [];
 let contextIntradayDailyPivotRenderToken = 0;
 let contextNews = [], contextFilings = [];
 let ntfyIsSending = false;
-let symbolActionIsSending = false;
 const radarTables = {};
 
 function removeMarketauxSections() {
@@ -1463,32 +1461,6 @@ function initNtfyComposer() {
       }
     }
   });
-}
-
-function setSymbolActionFeedback(message, kind = '') {
-  const feedback = document.getElementById('symbolActionFeedback');
-  if (!feedback) return;
-  feedback.textContent = message;
-  feedback.classList.toggle('is-error', kind === 'error');
-  feedback.classList.toggle('is-success', kind === 'success');
-}
-
-async function runSymbolAction() {
-  if (!symbolActionEnabled || symbolActionIsSending) return;
-  const button = document.getElementById('runSymbolAction');
-  symbolActionIsSending = true;
-  if (button) button.disabled = true;
-  setSymbolActionFeedback(`Sending {{TICKER}}…`);
-  try {
-    await axios.post('/api/symbol-action', { symbol: '{{TICKER}}' }, { timeout: 5000 });
-    setSymbolActionFeedback('{{TICKER}} sent', 'success');
-  } catch (err) {
-    const message = String(err.response?.data || err.message || 'Action unavailable').trim();
-    setSymbolActionFeedback(message, 'error');
-  } finally {
-    symbolActionIsSending = false;
-    if (button) button.disabled = false;
-  }
 }
 
 function attachOhlcvReadout(chart, candleSeries, volumeSeries, container) {
@@ -2360,6 +2332,8 @@ function openTickerFromRadar(symbol) {
     signal
   });
   if (hasSignalTime) params.set("time", timeStr);
+  const replayPort = new URLSearchParams(window.location.search).get('gap_replay');
+  if (replayPort) params.set('gap_replay',replayPort);
   window.location.href = `/chart?${params.toString()}`;
 }
 
@@ -4956,7 +4930,6 @@ document.getElementById('context-tab').addEventListener('shown.bs.tab', () => {
 
 // Initialize Signal Chart
 initNtfyComposer();
-document.getElementById('runSymbolAction')?.addEventListener('click', runSymbolAction);
 loadSignalChart();
 
 async function postToPatternfolio() {

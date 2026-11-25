@@ -56,3 +56,29 @@ func TestSymbolActionRejectsInvalidSymbolAndDisabledConfig(t *testing.T) {
 		t.Fatalf("disabled code=%d", disabled.Code)
 	}
 }
+
+func TestOpenChartPreservesGapReplayPort(t *testing.T) {
+	for _, test := range []struct {
+		query  string
+		status int
+		port   string
+	}{
+		{"", http.StatusFound, ""},
+		{"?gap_replay=8188", http.StatusFound, "8188"},
+		{"?gap_replay=70000", http.StatusBadRequest, ""},
+		{"?gap_replay=http://other", http.StatusBadRequest, ""},
+	} {
+		r := httptest.NewRequest(http.MethodGet, "/api/open-chart/MU/2026-11-24/0930"+test.query, nil)
+		w := httptest.NewRecorder()
+		openChartHandler(w, r)
+		if w.Code != test.status {
+			t.Fatalf("%s: got %d, want %d", test.query, w.Code, test.status)
+		}
+		if w.Code == http.StatusFound {
+			location, err := w.Result().Location()
+			if err != nil || location.Path != "/chart" || location.Query().Get("gap_replay") != test.port || location.Query().Get("time") != "0930" {
+				t.Fatalf("%s: unexpected redirect %v (%v)", test.query, location, err)
+			}
+		}
+	}
+}

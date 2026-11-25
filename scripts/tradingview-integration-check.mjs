@@ -31,6 +31,7 @@ class FakeElement {
     this.attributes = {};
   }
   setAttribute(name, value) { this.attributes[name] = value; }
+  removeAttribute(name) { delete this.attributes[name]; }
   insertAdjacentElement(_position, element) { this.owner.set(element.id, element); }
   closest(selector) { return selector === '#runSymbolAction' && this.id === 'runSymbolAction' ? this : null; }
 }
@@ -39,10 +40,14 @@ async function flush() {
   for (let i = 0; i < 30; i += 1) await Promise.resolve();
 }
 
-async function run({ enabled, connected = enabled, hiddenButton = false }) {
+const chartDate = '2026-08-14';
+const replayRoute = '/api/polygon/replay';
+
+async function run({ enabled, connected = enabled, hiddenButton = false, query = '', deskDate = chartDate, tapeOK = true, tvOK = true }) {
   const elements = new Map();
   const button = new FakeElement('runSymbolAction');
   button.owner = elements;
+  button.dataset = { configured: String(!hiddenButton) };
   if (hiddenButton) button.classList.add('d-none');
   button.textContent = hiddenButton ? 'Send symbol' : 'Load in Tape + Trading';
   const feedback = new FakeElement('symbolActionFeedback');
@@ -76,22 +81,25 @@ async function run({ enabled, connected = enabled, hiddenButton = false }) {
       };
     }
     if (String(url).endsWith('/ticker')) {
-      return {
-        ok: true,
-        json: async () => ({ symbol: 'AAPL' }),
-        text: async () => ''
-      };
+      return new Response(tvOK ? '{"symbol":"AAPL"}' : 'offline', { status: tvOK ? 200 : 503 });
     }
+    if (String(url).endsWith(replayRoute)) {
+      if (!options.method) return Response.json({ app: 'daidai-gap-replay', date: deskDate });
+      return tapeOK ? Response.json({ symbol: 'AAPL', loaded: true })
+        : Response.json({ error: 'Ticker unavailable in this replay.' }, { status: 422 });
+    }
+    if (url === '/api/symbol-action') return Response.json({ tape_ok: tapeOK });
     throw new Error(`unexpected URL ${url}`);
   };
 
+  const location = { hostname: 'localhost', search: '?ticker=aapl&date=' + chartDate + query };
   const context = {
-    window: { location: { search: '?ticker=aapl&date=2026-08-14' } },
+    window: { location }, location,
     document,
     fetch,
     Element: FakeElement,
     URLSearchParams,
-    AbortController,
+    AbortController, AbortSignal,
     setInterval: () => 0,
     console
   };
@@ -101,7 +109,7 @@ async function run({ enabled, connected = enabled, hiddenButton = false }) {
 
   return {
     calls,
-    button,
+    button, feedback,
     status: elements.get('tradingViewIntegrationStatus'),
     async click() {
       clickHandler({ target: button });
@@ -126,6 +134,29 @@ check('disabled integration sends no ticker request', harness.calls.every(call =
 harness = await run({ enabled: true, hiddenButton: true });
 check('TradingView-only setup reveals action button', !harness.button.classList.contains('d-none'));
 check('TradingView-only setup gives clear label', harness.button.textContent === 'Load in TradingView', harness.button.textContent);
+
+harness = await run({ enabled: false, hiddenButton: true, query: '&time=0930&gap_replay=8188' });
+check('replay alone reveals the chart button', !harness.button.classList.contains('d-none'));
+await harness.click();
+const replayPost = harness.calls.filter(c => c.method === 'POST');
+check('selects only on the chart’s replay port', replayPost.length === 1 && replayPost[0].url === 'http://127.0.0.1:8188'+replayRoute);
+check('sends date and ticker without changing the clock', replayPost[0]?.body === JSON.stringify({ symbol:'AAPL', date:chartDate }));
+check('confirmed replay is shown', harness.feedback.textContent === 'Tape replay · AAPL');
+
+harness = await run({ enabled:true, query:'&time=0930&gap_replay=8176', tapeOK:false });
+await harness.click();
+check('an unavailable Tape ticker leaves TradingView usable', harness.status.textContent === 'TV AAPL' && harness.feedback.classList.contains('is-error'));
+check('replay never sends a live fallback', harness.calls.every(c => c.url !== '/api/symbol-action'));
+
+harness = await run({ enabled:true, query:'&time=0930', tvOK:false });
+await harness.click();
+check('matching older timed link selects Tape with TradingView offline', harness.feedback.textContent === 'Tape replay · AAPL' && harness.status.textContent === 'TV ERROR');
+check('older link bypasses the live receiver for matching replay', harness.calls.every(c=>c.url !== '/api/symbol-action'));
+
+harness = await run({ enabled:false, query:'&time=0930', deskDate:'2026-08-13', tapeOK:false });
+await harness.click();
+check('other dates use the configured action', harness.calls.some(c=>c.url === '/api/symbol-action') && harness.calls.every(c=>c.method !== 'POST' || !c.url.endsWith(replayRoute)));
+check('live receiver reporting Tape offline is visible', harness.feedback.classList.contains('is-error'));
 
 if (failures.length) {
   console.error(`tradingview-integration-check FAILED:\n  ${failures.join('\n  ')}`);

@@ -154,6 +154,12 @@ request with a short timeout, avoiding cross-origin setup in local receivers.
 This hook is intentionally tool-agnostic so dashboards, journals, scanners,
 and other local workflows can use it without application-specific coupling.
 
+Charts opened from DaiDai Gap replay use **Load in Tape + Trading** to change the
+Tape ticker at the current shared replay time and speed. The replay desk confirms
+the load in the chart. This also works with the Watchlist service offline. Older
+local timed links can find a matching replay on the default desk port, 8176.
+The TradingView Desktop indicator reports its own result.
+
 Candlestick charts also show a high-contrast OHLCV readout when the pointer is
 over a candle.
 
